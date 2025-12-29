@@ -1,20 +1,24 @@
 # =============================================================================
-# Knowledge Base RAG - Docker Compose
+# Knowledge Base RAG - Docker Compose (Production)
 # =============================================================================
-# Run with: docker-compose up --build
-# 
+# Full stack deployment with all services in Docker.
+#
+# Quick Start:
+#   docker-compose up -d qdrant ollama    # Start infrastructure
+#   docker exec rag-ollama ollama pull llama3.2:3b  # Download model
+#   docker-compose --profile indexing up indexer    # Index documents (first time)
+#   docker-compose up app                 # Start the app
+#
 # Services:
 #   - app: Streamlit web application (port 8501)
 #   - qdrant: Vector database (port 6333)
-#   - ollama: Local LLM service (port 11434) - optional
+#   - ollama: Local LLM service (port 11434)
+#   - indexer: One-time indexing job (profile: indexing)
 #
 # Volumes:
-#   - domaindata: Your PDF documents
 #   - qdrant_data: Persisted vector index
 #   - ollama_models: Downloaded LLM models
 # =============================================================================
-
-version: '3.8'
 
 services:
   # ===========================================================================
@@ -75,11 +79,9 @@ services:
     restart: unless-stopped
     ports:
       - "8501:8501"
-    volumes:
-      # Mount domain data (read-only for safety)
-      - ./domaindata:/app/domaindata:ro
-      # Mount qdrant_db for local development (optional, uses Qdrant service in prod)
-      # - ./qdrant_db:/app/qdrant_db
+    # Note: domaindata/ is NOT needed at runtime - vectors are stored in Qdrant
+    # volumes:
+    #   - ./domaindata:/app/domaindata:ro  # Only needed for indexer service
     environment:
       # Vector DB configuration (use Qdrant service)
       - VECTOR_DB=qdrant_cloud
@@ -99,9 +101,6 @@ services:
       - CHUNK_OVERLAP=128
       - SIMILARITY_TOP_K=6
       - COLLECTION_NAME=knowledge_base
-      
-      # Paths
-      - KNOWLEDGE_BASE_DIR=/app/domaindata
     depends_on:
       qdrant:
         condition: service_healthy
