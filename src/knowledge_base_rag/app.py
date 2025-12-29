@@ -100,7 +100,8 @@ def render_sidebar():
                 manager = VectorStoreManager(embed_model=embed_model)
                 vs_healthy = manager.health_check()
                 vs_stats = manager.get_stats() if vs_healthy else {}
-            except Exception:
+            except Exception as e:
+                logger.error(f"Vector store check failed: {e}")
                 vs_healthy = False
                 vs_stats = {}
             
@@ -110,7 +111,11 @@ def render_sidebar():
                 st.caption(f"{vectors:,} vectors")
             else:
                 st.markdown("🔴 **Vector Store**")
-                st.caption("Not indexed")
+                # Show more specific status
+                if vs_stats.get("exists", False):
+                    st.caption("Empty collection")
+                else:
+                    st.caption(f"Not indexed ({settings.qdrant_path})")
         
         with col2:
             # LLM status
@@ -150,7 +155,9 @@ def render_sidebar():
         
         # Session info
         st.markdown("## 📊 Session")
-        st.metric("Queries", st.session_state.total_queries)
+        # Count queries from messages (more reliable than session counter)
+        query_count = len([m for m in st.session_state.messages if m["role"] == "user"])
+        st.metric("Queries", query_count)
         
         if st.button("🗑️ Clear History", use_container_width=True):
             st.session_state.messages = []

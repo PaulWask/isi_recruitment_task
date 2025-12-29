@@ -100,10 +100,16 @@ class VectorStoreManager:
 
     def _create_local_client(self) -> QdrantClient:
         """Create local Qdrant client with disk persistence."""
-        qdrant_path = Path(settings.qdrant_path)
-        qdrant_path.mkdir(parents=True, exist_ok=True)
-
+        # Use absolute path to ensure correct resolution
+        qdrant_path = settings.get_absolute_qdrant_path()
+        
         logger.info(f"Using local Qdrant at: {qdrant_path}")
+        logger.info(f"Qdrant path exists: {qdrant_path.exists()}")
+        
+        # Only create if doesn't exist (don't overwrite existing index)
+        if not qdrant_path.exists():
+            qdrant_path.mkdir(parents=True, exist_ok=True)
+            logger.info(f"Created qdrant_db directory: {qdrant_path}")
 
         return QdrantClient(path=str(qdrant_path))
 
@@ -483,14 +489,28 @@ class VectorStoreManager:
         }
 
     def health_check(self) -> bool:
-        """Check if vector store is healthy and accessible.
+        """Check if vector store is healthy and has indexed data.
 
         Returns:
-            True if healthy, False otherwise.
+            True if healthy AND collection exists with vectors, False otherwise.
         """
         try:
-            # Try to get collections list
+            # Check if we can connect
             self.client.get_collections()
+            
+            # Also check if our collection exists and has data
+            if not self.collection_exists():
+                logger.warning(f"Collection '{self.collection_name}' does not exist")
+                return False
+            
+            # Check if collection has vectors
+            info = self.get_collection_info()
+            if info:
+                vectors_count = info.get("vectors_count", 0)
+                if vectors_count == 0:
+                    logger.warning(f"Collection '{self.collection_name}' is empty")
+                    return False
+            
             return True
         except Exception as e:
             logger.error(f"Vector store health check failed: {e}")
