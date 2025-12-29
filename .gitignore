@@ -225,7 +225,7 @@ domaindata.zip
 
 # Vector database storage (generated locally)
 qdrant_db/
-storage/
+/storage/
 
 # Model cache (downloaded on first run)
 models/
