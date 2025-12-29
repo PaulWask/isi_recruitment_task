@@ -66,14 +66,130 @@ def init_session_state():
     
     if "total_queries" not in st.session_state:
         st.session_state.total_queries = 0
+    
+    if "initialized" not in st.session_state:
+        st.session_state.initialized = False
 
 
-def get_rag_engine() -> RAGEngine:
+def show_startup_screen():
+    """Show a loading screen during first initialization with real progress."""
+    # Loading screen with INLINE styles (works before CSS loads)
+    st.markdown("""
+    <style>
+        @keyframes spin { to { transform: rotate(360deg); } }
+        @keyframes bounce { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-10px); } }
+    </style>
+    <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:60vh; text-align:center;">
+        <div style="background:linear-gradient(135deg, #f8f9fa 0%, #ffffff 100%); padding:2rem; border-radius:1rem; box-shadow:0 8px 24px rgba(0,0,0,0.16); max-width:400px; width:90%;">
+            <div style="font-size:4rem; margin-bottom:1rem; animation:bounce 1s ease infinite;">📚</div>
+            <h1 style="background:linear-gradient(135deg, #667eea 0%, #764ba2 100%); -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text; font-size:1.8rem; font-weight:700; margin:0 0 0.5rem 0;">Knowledge Base Q&A</h1>
+            <p style="color:#6c757d; font-size:1rem; margin:0 0 1.5rem 0;">Initializing system...</p>
+            <div style="width:40px; height:40px; border:3px solid #dee2e6; border-top-color:#667eea; border-radius:50%; margin:0 auto; animation:spin 1s linear infinite;"></div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Progress containers - centered
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+        details_text = st.empty()
+    
+    def update_status(step: str, progress: float, detail: str = ""):
+        """Update loading status."""
+        progress_bar.progress(progress)
+        status_text.markdown(f"<p style='text-align:center; color:#667eea; font-weight:600;'>🔄 {step}</p>", unsafe_allow_html=True)
+        if detail:
+            details_text.markdown(f"<p style='text-align:center; color:#6c757d; font-size:0.85rem;'>{detail}</p>", unsafe_allow_html=True)
+    
+    try:
+        # Step 1: Configuration
+        logger.info("Starting initialization - Step 1: Configuration")
+        update_status("Loading configuration...", 0.1, f"LLM: {settings.llm_service}")
+        time.sleep(0.2)
+        
+        # Step 2: Embedding model
+        logger.info("Step 2: Loading embedding model...")
+        update_status("Initializing embedding model...", 0.25, "Loading all-MiniLM-L6-v2...")
+        embed_model = get_embed_model()
+        logger.info("Embedding model loaded")
+        
+        # Step 3: Vector store connection
+        abs_path = settings.get_absolute_qdrant_path()
+        update_status("Connecting to vector store...", 0.4, f"Path: {abs_path}")
+        logger.info(f"Connecting to Qdrant at: {abs_path}")
+        logger.info(f"Path exists: {abs_path.exists()}")
+        
+        manager = VectorStoreManager(embed_model=embed_model)
+        vs_stats = manager.get_stats()
+        vs_exists = vs_stats.get("exists", False)
+        vectors = vs_stats.get("vectors_count", 0)
+        
+        logger.info(f"Vector store stats: exists={vs_exists}, vectors={vectors}")
+        
+        if vs_exists and vectors > 0:
+            update_status("Vector store connected!", 0.55, f"✅ Found {vectors:,} vectors")
+        elif vs_exists:
+            update_status("Vector store connected", 0.55, f"⚠️ Collection exists but empty ({vectors} vectors)")
+        else:
+            update_status("Vector store status", 0.55, f"⚠️ No index found at {abs_path}")
+        time.sleep(0.3)
+        
+        # Step 4: LLM check
+        update_status("Checking language model...", 0.7, f"Service: {settings.llm_service}")
+        if settings.llm_service == "local":
+            llm_available = is_ollama_available()
+            if llm_available:
+                update_status("LLM ready!", 0.8, f"✅ Ollama ({settings.llm_model})")
+            else:
+                update_status("LLM status", 0.8, "⚠️ Ollama not running")
+        else:
+            has_key = bool(settings.groq_api_key)
+            if has_key:
+                update_status("LLM ready!", 0.8, f"✅ Groq ({settings.groq_model})")
+            else:
+                update_status("LLM status", 0.8, "⚠️ Groq API key not set")
+        time.sleep(0.2)
+        
+        # Step 5: Initialize RAG engine
+        update_status("Preparing RAG engine...", 0.9, "Building query engine...")
+        st.session_state.rag_engine = RAGEngine()
+        
+        # Engine is ready if we have vectors (more reliable than is_ready() which can fail on lock issues)
+        st.session_state.engine_ready = vs_exists and vectors > 0
+        
+        # Done!
+        if st.session_state.engine_ready:
+            update_status("Ready!", 1.0, "✅ All systems initialized")
+        else:
+            update_status("Setup required", 1.0, "⚠️ Run indexing to get started")
+        time.sleep(0.5)
+        
+    except Exception as e:
+        logger.error(f"Startup error: {e}")
+        logger.exception(e)
+        status_text.error(f"Initialization error: {e}")
+        # Still mark as initialized so user can see the "not ready" warning with instructions
+        st.session_state.engine_ready = False
+        time.sleep(2)
+    
+    # Mark as initialized and refresh
+    st.session_state.initialized = True
+    st.rerun()
+
+
+def get_rag_engine() -> RAGEngine | None:
     """Get or create RAG engine (cached in session)."""
     if st.session_state.rag_engine is None:
         try:
             st.session_state.rag_engine = RAGEngine()
-            st.session_state.engine_ready = st.session_state.rag_engine.is_ready()
+            # Check if we have vectors (more reliable than is_ready())
+            try:
+                stats = st.session_state.rag_engine.vector_store_manager.get_stats()
+                st.session_state.engine_ready = stats.get("exists", False) and stats.get("vectors_count", 0) > 0
+            except Exception:
+                st.session_state.engine_ready = False
         except Exception as e:
             logger.error(f"Failed to initialize RAG engine: {e}")
             st.session_state.engine_ready = False
@@ -98,12 +214,13 @@ def render_sidebar():
             try:
                 embed_model = get_embed_model()
                 manager = VectorStoreManager(embed_model=embed_model)
-                vs_healthy = manager.health_check()
-                vs_stats = manager.get_stats() if vs_healthy else {}
+                # Always get stats first for accurate status
+                vs_stats = manager.get_stats()
+                vs_healthy = vs_stats.get("exists", False) and vs_stats.get("vectors_count", 0) > 0
             except Exception as e:
                 logger.error(f"Vector store check failed: {e}")
                 vs_healthy = False
-                vs_stats = {}
+                vs_stats = {"exists": False}
             
             if vs_healthy:
                 st.markdown("🟢 **Vector Store**")
@@ -113,9 +230,10 @@ def render_sidebar():
                 st.markdown("🔴 **Vector Store**")
                 # Show more specific status
                 if vs_stats.get("exists", False):
-                    st.caption("Empty collection")
+                    vectors = vs_stats.get("vectors_count", 0)
+                    st.caption(f"Empty ({vectors} vectors)")
                 else:
-                    st.caption(f"Not indexed ({settings.qdrant_path})")
+                    st.caption("Not indexed")
         
         with col2:
             # LLM status
@@ -223,7 +341,7 @@ def render_message(role: str, content: str, sources: list | None = None, show_so
 
 
 def render_chat_history(show_sources: bool):
-    """Render the chat history."""
+    """Render the chat history with latency info."""
     for msg in st.session_state.messages:
         render_message(
             msg["role"], 
@@ -231,6 +349,13 @@ def render_chat_history(show_sources: bool):
             msg.get("sources"),
             show_sources
         )
+        # Show latency for assistant messages
+        if msg["role"] == "assistant" and "latency_ms" in msg:
+            latency = msg["latency_ms"]
+            if latency >= 1000:
+                st.caption(f"⏱️ {latency/1000:.2f}s")
+            else:
+                st.caption(f"⏱️ {latency:.0f}ms")
 
 
 def render_not_ready_warning():
@@ -295,7 +420,15 @@ ollama pull llama3.2:3b
 
 def main():
     """Main application entry point."""
+    logger.info("=== main() called ===")
     init_session_state()
+    logger.info(f"Session state: initialized={st.session_state.initialized}")
+    
+    # Show startup screen on first load
+    if not st.session_state.initialized:
+        logger.info("Showing startup screen...")
+        show_startup_screen()
+        return
     
     # Sidebar
     top_k, show_sources = render_sidebar()
@@ -307,7 +440,7 @@ def main():
     engine = get_rag_engine()
     
     # Check if system is ready
-    if not st.session_state.engine_ready:
+    if not st.session_state.engine_ready or engine is None:
         render_not_ready_warning()
         return
     
@@ -345,8 +478,11 @@ def main():
                 # Display response
                 render_message("assistant", response.answer, response.sources, show_sources)
                 
-                # Show latency
-                st.caption(f"⏱️ {latency:.0f}ms")
+                # Show latency in appropriate unit
+                if latency >= 1000:
+                    st.caption(f"⏱️ {latency/1000:.2f}s")
+                else:
+                    st.caption(f"⏱️ {latency:.0f}ms")
                 
             except Exception as e:
                 error_msg = f"Error: {str(e)}"
@@ -358,8 +494,12 @@ def main():
                     "content": f"❌ {error_msg}",
                     "sources": [],
                 })
+        
+        # Rerun to update sidebar with new query count
+        st.rerun()
 
 
-if __name__ == "__main__":
-    main()
+# Streamlit runs the entire script on each interaction
+# Call main() directly (not inside __name__ guard)
+main()
 

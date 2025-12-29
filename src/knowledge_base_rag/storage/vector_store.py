@@ -37,6 +37,47 @@ from knowledge_base_rag.core.config import settings
 
 logger = logging.getLogger(__name__)
 
+# Module-level singleton for Qdrant client to prevent concurrent access issues
+# Local file-based Qdrant doesn't support multiple connections
+_qdrant_client_singleton: Optional[QdrantClient] = None
+
+
+def get_qdrant_client() -> QdrantClient:
+    """Get singleton Qdrant client to avoid concurrent access issues.
+    
+    Local file-based Qdrant only allows one client connection at a time.
+    This singleton ensures we reuse the same client instance.
+    """
+    global _qdrant_client_singleton
+    
+    if _qdrant_client_singleton is None:
+        if settings.vector_db == "qdrant_cloud":
+            if not settings.qdrant_cloud_url:
+                raise ValueError("QDRANT_CLOUD_URL is required for cloud mode")
+            
+            if settings.qdrant_cloud_api_key:
+                _qdrant_client_singleton = QdrantClient(
+                    url=settings.qdrant_cloud_url,
+                    api_key=settings.qdrant_cloud_api_key,
+                )
+            else:
+                # Self-hosted Qdrant (Docker) - no API key needed
+                _qdrant_client_singleton = QdrantClient(url=settings.qdrant_cloud_url)
+            logger.info(f"Connected to Qdrant server: {settings.qdrant_cloud_url}")
+        else:
+            # Local file-based client
+            qdrant_path = settings.get_absolute_qdrant_path()
+            logger.info(f"Using local Qdrant at: {qdrant_path}")
+            logger.info(f"Qdrant path exists: {qdrant_path.exists()}")
+            
+            if not qdrant_path.exists():
+                qdrant_path.mkdir(parents=True, exist_ok=True)
+                logger.info(f"Created qdrant_db directory: {qdrant_path}")
+            
+            _qdrant_client_singleton = QdrantClient(path=str(qdrant_path))
+    
+    return _qdrant_client_singleton
+
 
 class VectorStoreManager:
     """Manage Qdrant vector store for document embeddings.
@@ -82,62 +123,10 @@ class VectorStoreManager:
 
     @property
     def client(self) -> QdrantClient:
-        """Get or create the Qdrant client (lazy initialization)."""
+        """Get the Qdrant client (uses module singleton for local mode)."""
         if self._client is None:
-            self._client = self._create_client()
+            self._client = get_qdrant_client()
         return self._client
-
-    def _create_client(self) -> QdrantClient:
-        """Create Qdrant client based on configuration.
-
-        Returns:
-            Configured QdrantClient instance.
-        """
-        if settings.vector_db == "qdrant_cloud":
-            return self._create_cloud_client()
-        else:
-            return self._create_local_client()
-
-    def _create_local_client(self) -> QdrantClient:
-        """Create local Qdrant client with disk persistence."""
-        # Use absolute path to ensure correct resolution
-        qdrant_path = settings.get_absolute_qdrant_path()
-        
-        logger.info(f"Using local Qdrant at: {qdrant_path}")
-        logger.info(f"Qdrant path exists: {qdrant_path.exists()}")
-        
-        # Only create if doesn't exist (don't overwrite existing index)
-        if not qdrant_path.exists():
-            qdrant_path.mkdir(parents=True, exist_ok=True)
-            logger.info(f"Created qdrant_db directory: {qdrant_path}")
-
-        return QdrantClient(path=str(qdrant_path))
-
-    def _create_cloud_client(self) -> QdrantClient:
-        """Create Qdrant Cloud/Server client.
-        
-        Supports both:
-        - Qdrant Cloud (requires API key)
-        - Self-hosted Qdrant (Docker, no API key needed)
-        """
-        if not settings.qdrant_cloud_url:
-            raise ValueError(
-                "QDRANT_CLOUD_URL required for cloud/server mode.\n"
-                "For Docker: http://qdrant:6333\n"
-                "For Cloud: https://your-cluster.qdrant.io"
-            )
-
-        logger.info(f"Connecting to Qdrant at: {settings.qdrant_cloud_url}")
-
-        # API key is optional for self-hosted Qdrant (Docker)
-        if settings.qdrant_cloud_api_key:
-            return QdrantClient(
-                url=settings.qdrant_cloud_url,
-                api_key=settings.qdrant_cloud_api_key,
-            )
-        else:
-            # No API key = self-hosted Qdrant (Docker)
-            return QdrantClient(url=settings.qdrant_cloud_url)
 
     @property
     def vector_store(self) -> QdrantVectorStore:
