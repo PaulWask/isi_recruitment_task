@@ -233,3 +233,6 @@ models/
 
 # HuggingFace cache
 huggingface/
+
+# Chat history (persisted between sessions)
+chat_history.json

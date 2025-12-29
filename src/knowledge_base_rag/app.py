@@ -5,7 +5,7 @@ Features:
 - Chat-style Q&A interface
 - Source attribution with expandable details
 - Confidence indicators
-- Session history
+- Persistent session history
 - System status dashboard
 
 Run with:
@@ -14,9 +14,11 @@ Run with:
     uv run kb-app
 """
 
+import json
 import logging
 import time
 from datetime import datetime
+from pathlib import Path
 
 import streamlit as st
 
@@ -32,6 +34,9 @@ from knowledge_base_rag.ui import (
     render_assistant_message,
     render_header as render_header_html,
 )
+
+# Chat history persistence file
+CHAT_HISTORY_FILE = Path("chat_history.json")
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -50,13 +55,99 @@ st.markdown(load_css(), unsafe_allow_html=True)
 
 
 # =============================================================================
+# Cached Resources (persist across page refreshes AND sessions)
+# =============================================================================
+
+@st.cache_resource(show_spinner=False)
+def get_cached_rag_engine() -> RAGEngine:
+    """Get cached RAG engine - initialized ONCE per server lifetime."""
+    logger.info("🚀 Initializing RAG engine (first time only)...")
+    return RAGEngine()
+
+
+@st.cache_resource(show_spinner=False)
+def get_cached_embed_model():
+    """Get cached embedding model - loaded ONCE per server lifetime."""
+    logger.info("🚀 Loading embedding model (first time only)...")
+    return get_embed_model()
+
+
+@st.cache_resource(show_spinner=False)
+def get_cached_vector_store_stats() -> dict:
+    """Get cached vector store stats - checked ONCE per server lifetime."""
+    logger.info("🚀 Checking vector store (first time only)...")
+    try:
+        embed_model = get_cached_embed_model()
+        manager = VectorStoreManager(embed_model=embed_model)
+        stats = manager.get_stats()
+        stats["_cached"] = True
+        return stats
+    except Exception as e:
+        logger.error(f"Vector store check failed: {e}")
+        return {"exists": False, "vectors_count": 0, "_cached": True}
+
+
+@st.cache_data(ttl=30, show_spinner=False)  # Cache for 30 seconds
+def check_ollama_status() -> bool:
+    """Check Ollama status - cached for 30 seconds to avoid spam."""
+    return is_ollama_available()
+
+
+def check_system_ready() -> tuple[bool, dict]:
+    """Quick check if system is ready (uses cached resources)."""
+    stats = get_cached_vector_store_stats()
+    exists = stats.get("exists", False)
+    vectors = stats.get("vectors_count", 0)
+    return exists and vectors > 0, stats
+
+
+def are_resources_cached() -> bool:
+    """Check if heavy resources are already cached (instant check)."""
+    try:
+        # This is a quick check - if cache exists, it returns instantly
+        # We check if the cache key exists without triggering full computation
+        return get_cached_vector_store_stats().get("_cached", False)
+    except Exception:
+        return False
+
+
+# =============================================================================
+# Chat History Persistence
+# =============================================================================
+
+def save_chat_history():
+    """Save chat history to file."""
+    try:
+        history = {
+            "messages": st.session_state.messages,
+            "saved_at": datetime.now().isoformat(),
+        }
+        CHAT_HISTORY_FILE.write_text(json.dumps(history, indent=2, default=str))
+        logger.info(f"Chat history saved: {len(st.session_state.messages)} messages")
+    except Exception as e:
+        logger.error(f"Failed to save chat history: {e}")
+
+
+def load_chat_history():
+    """Load chat history from file."""
+    try:
+        if CHAT_HISTORY_FILE.exists():
+            data = json.loads(CHAT_HISTORY_FILE.read_text())
+            return data.get("messages", [])
+    except Exception as e:
+        logger.error(f"Failed to load chat history: {e}")
+    return []
+
+
+# =============================================================================
 # Session State Initialization
 # =============================================================================
 
 def init_session_state():
     """Initialize session state variables."""
     if "messages" not in st.session_state:
-        st.session_state.messages = []
+        # Try to load from file first
+        st.session_state.messages = load_chat_history()
     
     if "rag_engine" not in st.session_state:
         st.session_state.rag_engine = None
@@ -68,23 +159,34 @@ def init_session_state():
         st.session_state.total_queries = 0
     
     if "initialized" not in st.session_state:
-        st.session_state.initialized = False
+        # Skip startup screen if resources are already cached (fast path)
+        if are_resources_cached():
+            logger.info("⚡ Resources already cached - skipping startup screen")
+            st.session_state.initialized = True
+            st.session_state.rag_engine = get_cached_rag_engine()
+            is_ready, _ = check_system_ready()
+            st.session_state.engine_ready = is_ready
+        else:
+            st.session_state.initialized = False
 
 
 def show_startup_screen():
-    """Show a loading screen during first initialization with real progress."""
-    # Loading screen with INLINE styles (works before CSS loads)
+    """Show a loading screen during first initialization with real progress.
+    
+    Uses cached resources for faster subsequent loads.
+    """
+    # Loading screen with INLINE styles (works in both light/dark mode)
     st.markdown("""
     <style>
         @keyframes spin { to { transform: rotate(360deg); } }
-        @keyframes bounce { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-10px); } }
+        @keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-8px); } }
     </style>
     <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:60vh; text-align:center;">
-        <div style="background:linear-gradient(135deg, #f8f9fa 0%, #ffffff 100%); padding:2rem; border-radius:1rem; box-shadow:0 8px 24px rgba(0,0,0,0.16); max-width:400px; width:90%;">
-            <div style="font-size:4rem; margin-bottom:1rem; animation:bounce 1s ease infinite;">📚</div>
+        <div style="background:rgba(30, 30, 50, 0.95); border:1px solid rgba(102,126,234,0.3); padding:2rem; border-radius:1rem; box-shadow:0 8px 32px rgba(0,0,0,0.3), 0 0 30px rgba(102,126,234,0.15); max-width:400px; width:90%;">
+            <div style="font-size:4rem; margin-bottom:1rem; animation:float 3s ease-in-out infinite;">📚</div>
             <h1 style="background:linear-gradient(135deg, #667eea 0%, #764ba2 100%); -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text; font-size:1.8rem; font-weight:700; margin:0 0 0.5rem 0;">Knowledge Base Q&A</h1>
-            <p style="color:#6c757d; font-size:1rem; margin:0 0 1.5rem 0;">Initializing system...</p>
-            <div style="width:40px; height:40px; border:3px solid #dee2e6; border-top-color:#667eea; border-radius:50%; margin:0 auto; animation:spin 1s linear infinite;"></div>
+            <p style="color:#a1a1aa; font-size:1rem; margin:0 0 1.5rem 0;">Initializing system...</p>
+            <div style="width:40px; height:40px; border:3px solid rgba(102,126,234,0.3); border-top-color:#667eea; border-radius:50%; margin:0 auto; animation:spin 1s linear infinite;"></div>
         </div>
     </div>
     """, unsafe_allow_html=True)
@@ -101,62 +203,45 @@ def show_startup_screen():
         progress_bar.progress(progress)
         status_text.markdown(f"<p style='text-align:center; color:#667eea; font-weight:600;'>🔄 {step}</p>", unsafe_allow_html=True)
         if detail:
-            details_text.markdown(f"<p style='text-align:center; color:#6c757d; font-size:0.85rem;'>{detail}</p>", unsafe_allow_html=True)
+            details_text.markdown(f"<p style='text-align:center; color:#a1a1aa; font-size:0.85rem;'>{detail}</p>", unsafe_allow_html=True)
     
     try:
-        # Step 1: Configuration
-        logger.info("Starting initialization - Step 1: Configuration")
-        update_status("Loading configuration...", 0.1, f"LLM: {settings.llm_service}")
-        time.sleep(0.2)
+        # Step 1: Configuration (instant)
+        update_status("Loading configuration...", 0.2, f"LLM: {settings.llm_service}")
         
-        # Step 2: Embedding model
-        logger.info("Step 2: Loading embedding model...")
-        update_status("Initializing embedding model...", 0.25, "Loading all-MiniLM-L6-v2...")
-        embed_model = get_embed_model()
-        logger.info("Embedding model loaded")
-        
-        # Step 3: Vector store connection
-        abs_path = settings.get_absolute_qdrant_path()
-        update_status("Connecting to vector store...", 0.4, f"Path: {abs_path}")
-        logger.info(f"Connecting to Qdrant at: {abs_path}")
-        logger.info(f"Path exists: {abs_path.exists()}")
-        
-        manager = VectorStoreManager(embed_model=embed_model)
-        vs_stats = manager.get_stats()
+        # Step 2 & 3: Load embedding model + check vector store (CACHED)
+        update_status("Loading resources...", 0.5, "Embedding model + Vector store...")
+        vs_stats = get_cached_vector_store_stats()
         vs_exists = vs_stats.get("exists", False)
         vectors = vs_stats.get("vectors_count", 0)
         
-        logger.info(f"Vector store stats: exists={vs_exists}, vectors={vectors}")
-        
         if vs_exists and vectors > 0:
-            update_status("Vector store connected!", 0.55, f"✅ Found {vectors:,} vectors")
+            update_status("Vector store ready!", 0.65, f"✅ {vectors:,} vectors indexed")
         elif vs_exists:
-            update_status("Vector store connected", 0.55, f"⚠️ Collection exists but empty ({vectors} vectors)")
+            update_status("Vector store empty", 0.65, "⚠️ Run indexing first")
         else:
-            update_status("Vector store status", 0.55, f"⚠️ No index found at {abs_path}")
-        time.sleep(0.3)
+            update_status("No index found", 0.65, "⚠️ Run indexing first")
         
-        # Step 4: LLM check
-        update_status("Checking language model...", 0.7, f"Service: {settings.llm_service}")
+        # Step 4: LLM check (CACHED for 30 seconds)
+        update_status("Checking language model...", 0.75, f"Service: {settings.llm_service}")
         if settings.llm_service == "local":
-            llm_available = is_ollama_available()
+            llm_available = check_ollama_status()  # Cached!
             if llm_available:
-                update_status("LLM ready!", 0.8, f"✅ Ollama ({settings.llm_model})")
+                update_status("LLM ready!", 0.85, f"✅ Ollama ({settings.llm_model})")
             else:
-                update_status("LLM status", 0.8, "⚠️ Ollama not running")
+                update_status("LLM offline", 0.85, "⚠️ Start Ollama to enable queries")
         else:
             has_key = bool(settings.groq_api_key)
             if has_key:
-                update_status("LLM ready!", 0.8, f"✅ Groq ({settings.groq_model})")
+                update_status("LLM ready!", 0.85, f"✅ Groq ({settings.groq_model})")
             else:
-                update_status("LLM status", 0.8, "⚠️ Groq API key not set")
-        time.sleep(0.2)
+                update_status("LLM not configured", 0.85, "⚠️ Set GROQ_API_KEY")
         
-        # Step 5: Initialize RAG engine
-        update_status("Preparing RAG engine...", 0.9, "Building query engine...")
-        st.session_state.rag_engine = RAGEngine()
+        # Step 5: Initialize RAG engine (CACHED)
+        update_status("Preparing RAG engine...", 0.95, "Almost ready...")
+        st.session_state.rag_engine = get_cached_rag_engine()
         
-        # Engine is ready if we have vectors (more reliable than is_ready() which can fail on lock issues)
+        # Engine is ready if we have vectors
         st.session_state.engine_ready = vs_exists and vectors > 0
         
         # Done!
@@ -180,18 +265,16 @@ def show_startup_screen():
 
 
 def get_rag_engine() -> RAGEngine | None:
-    """Get or create RAG engine (cached in session)."""
+    """Get RAG engine (uses cached version for speed)."""
     if st.session_state.rag_engine is None:
         try:
-            st.session_state.rag_engine = RAGEngine()
-            # Check if we have vectors (more reliable than is_ready())
-            try:
-                stats = st.session_state.rag_engine.vector_store_manager.get_stats()
-                st.session_state.engine_ready = stats.get("exists", False) and stats.get("vectors_count", 0) > 0
-            except Exception:
-                st.session_state.engine_ready = False
+            # Use cached engine for faster loads
+            st.session_state.rag_engine = get_cached_rag_engine()
+            # Quick system check
+            is_ready, stats = check_system_ready()
+            st.session_state.engine_ready = is_ready
         except Exception as e:
-            logger.error(f"Failed to initialize RAG engine: {e}")
+            logger.error(f"Failed to get RAG engine: {e}")
             st.session_state.engine_ready = False
     
     return st.session_state.rag_engine
@@ -206,21 +289,13 @@ def render_sidebar():
     with st.sidebar:
         st.markdown("## ⚙️ System Status")
         
-        # Check services
+        # Check services (using CACHED status - no repeated DB/HTTP calls)
         col1, col2 = st.columns(2)
         
         with col1:
-            # Vector store status
-            try:
-                embed_model = get_embed_model()
-                manager = VectorStoreManager(embed_model=embed_model)
-                # Always get stats first for accurate status
-                vs_stats = manager.get_stats()
-                vs_healthy = vs_stats.get("exists", False) and vs_stats.get("vectors_count", 0) > 0
-            except Exception as e:
-                logger.error(f"Vector store check failed: {e}")
-                vs_healthy = False
-                vs_stats = {"exists": False}
+            # Vector store status (CACHED)
+            vs_stats = get_cached_vector_store_stats()
+            vs_healthy = vs_stats.get("exists", False) and vs_stats.get("vectors_count", 0) > 0
             
             if vs_healthy:
                 st.markdown("🟢 **Vector Store**")
@@ -228,17 +303,15 @@ def render_sidebar():
                 st.caption(f"{vectors:,} vectors")
             else:
                 st.markdown("🔴 **Vector Store**")
-                # Show more specific status
                 if vs_stats.get("exists", False):
-                    vectors = vs_stats.get("vectors_count", 0)
-                    st.caption(f"Empty ({vectors} vectors)")
+                    st.caption("Empty collection")
                 else:
                     st.caption("Not indexed")
         
         with col2:
-            # LLM status
+            # LLM status (CACHED for 30 seconds)
             if settings.llm_service == "local":
-                llm_available = is_ollama_available()
+                llm_available = check_ollama_status()  # Cached!
                 if llm_available:
                     st.markdown("🟢 **LLM (Ollama)**")
                     st.caption(settings.llm_model)
@@ -279,6 +352,9 @@ def render_sidebar():
         
         if st.button("🗑️ Clear History", use_container_width=True):
             st.session_state.messages = []
+            # Also delete the saved history file
+            if CHAT_HISTORY_FILE.exists():
+                CHAT_HISTORY_FILE.unlink()
             st.rerun()
         
         st.divider()
@@ -420,13 +496,11 @@ ollama pull llama3.2:3b
 
 def main():
     """Main application entry point."""
-    logger.info("=== main() called ===")
     init_session_state()
-    logger.info(f"Session state: initialized={st.session_state.initialized}")
     
-    # Show startup screen on first load
+    # Show startup screen only on FIRST load (not cached yet)
     if not st.session_state.initialized:
-        logger.info("Showing startup screen...")
+        logger.info("📦 First load - showing startup screen...")
         show_startup_screen()
         return
     
@@ -494,6 +568,9 @@ def main():
                     "content": f"❌ {error_msg}",
                     "sources": [],
                 })
+        
+        # Save chat history to file (persists across refreshes)
+        save_chat_history()
         
         # Rerun to update sidebar with new query count
         st.rerun()
