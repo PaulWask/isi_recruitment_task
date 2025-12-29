@@ -4,16 +4,16 @@ version = "0.1.0"
 description = "Pure RAG - 750MB Domain Knowledge Base"
 authors = [{name = "Pawel Waskiewicz"}]
 dependencies = [
-    # LlamaIndex core and extensions
-    "llama-index-core>=0.10.30,<0.12",
+    # LlamaIndex core and extensions (pinned for compatibility)
+    "llama-index-core>=0.10.30,<0.11",
     "llama-index-readers-file>=0.1.0,<0.2",
     "llama-index-vector-stores-qdrant>=0.2.0,<0.3",
     "llama-index-embeddings-huggingface>=0.2.0,<0.3",
-    "llama-index-llms-ollama>=0.1.0,<0.4",
-    "llama-index-llms-groq>=0.1.0,<0.3",
+    "llama-index-llms-ollama>=0.1.0,<0.3",
+    "llama-index-llms-groq>=0.1.0,<0.2",
     
-    # Vector DB
-    "qdrant-client>=1.9.0,<2.0",
+    # Vector DB (pinned for LlamaIndex compatibility)
+    "qdrant-client>=1.9.0,<1.12",
     
     # Web UI
     "streamlit>=1.35.0,<2.0",
