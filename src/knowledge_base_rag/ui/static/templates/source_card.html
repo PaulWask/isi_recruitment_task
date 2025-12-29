@@ -1,5 +1,5 @@
 <!-- Source Card Template
-     Variables: {score_percent}, {score_class}, {location_str}, {file_name}, {text_preview}, {source_path}
+     Variables: {score_percent}, {score_class}, {location_str}, {file_name}, {text_preview}, {path_section}
 -->
 <div class="source-card">
     <div class="source-header">
@@ -8,9 +8,5 @@
     </div>
     <span class="source-filename">📄 {file_name}</span>
     <div class="source-text">{text_preview}</div>
-    <details>
-        <summary>Show full path</summary>
-        <div class="source-path">{source_path}</div>
-    </details>
+    {path_section}
 </div>
-

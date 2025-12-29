@@ -85,15 +85,28 @@ def render_source_card(
         location_parts.append(escape_html(file_type.upper()))
     location_str = " • ".join(location_parts)
     
+    # Only show path details if it adds information (path differs from filename)
+    escaped_path = escape_html(source_path)
+    escaped_filename = escape_html(file_name)
+    
+    # Show path only if it contains more than just the filename
+    if escaped_path and escaped_path != escaped_filename and not escaped_path.endswith(f"/{escaped_filename}"):
+        path_section = f'''<details>
+        <summary>📁 Show full path</summary>
+        <div class="source-path">{escaped_path}</div>
+    </details>'''
+    else:
+        path_section = ""
+    
     # Load and fill template
     template = _load_template("source_card.html")
     return template.format(
         score_percent=f"{score:.0%}",
         score_class=score_class,
         location_str=location_str,
-        file_name=escape_html(file_name),
+        file_name=escaped_filename,
         text_preview=escape_html(text_preview),
-        source_path=escape_html(source_path),
+        path_section=path_section,
     )
 
 

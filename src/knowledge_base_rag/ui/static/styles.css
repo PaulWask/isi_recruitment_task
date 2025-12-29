@@ -219,6 +219,12 @@ body {
     padding: var(--space-md);
     border-radius: var(--radius-md);
     border-left: 3px solid var(--accent-primary);
+    /* Better text handling for longer content */
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+    white-space: pre-wrap;
+    max-height: 300px;
+    overflow-y: auto;
 }
 
 .source-metadata {
