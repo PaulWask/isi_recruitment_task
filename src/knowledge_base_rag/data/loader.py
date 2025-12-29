@@ -220,3 +220,84 @@ class DocumentLoader:
                 files.append(file_path)
 
         return sorted(files)
+
+    def load_file(self, file_path: Path) -> Optional[Document]:
+        """Load a single file and return as Document.
+
+        Args:
+            file_path: Path to the file to load.
+
+        Returns:
+            Document object with metadata, or None if loading fails.
+        """
+        if not file_path.exists():
+            logger.warning(f"File not found: {file_path}")
+            return None
+
+        ext = file_path.suffix.lower()
+        if ext not in SUPPORTED_EXTENSIONS:
+            logger.warning(f"Unsupported file type: {ext}")
+            return None
+
+        try:
+            # Use SimpleDirectoryReader for single file
+            reader = SimpleDirectoryReader(
+                input_files=[str(file_path)],
+                filename_as_id=True,
+            )
+            docs = reader.load_data(show_progress=False)
+
+            if docs:
+                doc = docs[0]
+                self._enrich_metadata(doc)
+                self._stats["successful"] += 1
+                
+                # Track by extension
+                self._stats["by_extension"][ext] = self._stats["by_extension"].get(ext, 0) + 1
+                
+                return doc
+
+        except Exception as e:
+            logger.warning(f"Failed to load {file_path}: {e}")
+            self._stats["failed"] += 1
+
+        return None
+
+    def load_all(self, show_progress: bool = True) -> list[Document]:
+        """Load all documents (alias for load_documents with stats tracking).
+
+        Args:
+            show_progress: Show loading progress bar.
+
+        Returns:
+            List of Document objects.
+        """
+        self._reset_stats()
+        docs = self.load_documents(show_progress=show_progress)
+        
+        # Update stats
+        self._stats["successful"] = len(docs)
+        for doc in docs:
+            ext = doc.metadata.get("file_type", "")
+            if ext:
+                self._stats["by_extension"][ext] = self._stats["by_extension"].get(ext, 0) + 1
+        
+        return docs
+
+    def _reset_stats(self) -> None:
+        """Reset loading statistics."""
+        self._stats = {
+            "successful": 0,
+            "failed": 0,
+            "by_extension": {},
+        }
+
+    def get_stats(self) -> dict:
+        """Get loading statistics from the last load operation.
+
+        Returns:
+            Dictionary with 'successful', 'failed', and 'by_extension' counts.
+        """
+        if not hasattr(self, "_stats"):
+            self._reset_stats()
+        return self._stats

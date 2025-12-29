@@ -103,16 +103,17 @@ class DocumentProcessor:
         # Convert nodes back to Documents with enriched metadata
         chunks: list[Document] = []
         for i, node in enumerate(nodes):
+            # Build metadata dict
+            meta = node.metadata.copy() if node.metadata else {}
+            meta["chunk_index"] = i
+            meta["chunk_size"] = len(node.get_content())
+            
             # Create document from node content
             chunk = Document(
                 text=node.get_content(),
-                metadata=node.metadata.copy() if node.metadata else {},
+                extra_info=meta,
                 doc_id=node.node_id,
             )
-
-            # Add chunk-specific metadata
-            chunk.metadata["chunk_index"] = i
-            chunk.metadata["chunk_size"] = len(node.get_content())
 
             chunks.append(chunk)
 
