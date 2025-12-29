@@ -344,6 +344,60 @@ class VectorStoreManager:
             "Either run indexing first or provide documents."
         )
 
+    def add_documents(
+        self,
+        documents: list[Document],
+        show_progress: bool = True,
+    ) -> VectorStoreIndex:
+        """Add documents to an existing index (incremental update).
+
+        Unlike create_index, this does NOT delete the existing collection.
+        New documents are added alongside existing ones.
+
+        Args:
+            documents: New documents to add (should be pre-chunked).
+            show_progress: Show indexing progress bar.
+
+        Returns:
+            VectorStoreIndex for querying.
+
+        Raises:
+            ValueError: If no documents or embedding model not set.
+        """
+        if self.embed_model is None:
+            raise ValueError(
+                "Embedding model required for indexing. "
+                "Pass embed_model to VectorStoreManager constructor."
+            )
+
+        if not documents:
+            raise ValueError("No documents provided for indexing.")
+
+        if not self.collection_exists():
+            # No existing index, create new one
+            logger.info("No existing index, creating new one")
+            return self.create_index(documents, show_progress)
+
+        logger.info(f"Adding {len(documents)} documents to existing index...")
+
+        # Load existing index
+        index = self.load_index()
+        if index is None:
+            return self.create_index(documents, show_progress)
+
+        # Insert new documents into existing index
+        for doc in documents:
+            index.insert(doc, show_progress=show_progress)
+
+        # Log stats
+        info = self.get_collection_info()
+        if info:
+            logger.info(
+                f"Index updated: now {info['vectors_count']} vectors"
+            )
+
+        return index
+
     # =========================================================================
     # Search Operations
     # =========================================================================

@@ -40,6 +40,10 @@ dependencies = [
 ]
 requires-python = ">=3.11,<3.15"
 
+[project.scripts]
+kb-index = "knowledge_base_rag.cli:index_main"
+kb-app = "knowledge_base_rag.cli:app_main"
+
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0.0",
