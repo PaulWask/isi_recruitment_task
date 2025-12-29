@@ -233,12 +233,62 @@ For local development with hot-reload and existing local index:
 docker-compose -f docker-compose.dev.yml up
 ```
 
-**Differences between compose files:**
+## Docker Compose Files - Comparison
 
-| File | Qdrant | Ollama | Use Case |
-|------|--------|--------|----------|
-| `docker-compose.yml` | Docker container | Docker container | Production, fresh deploy |
-| `docker-compose.dev.yml` | Local `qdrant_db/` | Host's Ollama | Development, existing index |
+The project includes two Docker Compose configurations for different use cases:
+
+### `docker-compose.yml` (Production / Full Stack)
+
+**Best for:** Fresh installations, CI/CD, production deployments, or new team members.
+
+```bash
+docker-compose up --build
+```
+
+| Aspect | Details |
+|--------|---------|
+| **Services** | 4 (app, qdrant, ollama, indexer) |
+| **Qdrant** | Runs as separate Docker container |
+| **Ollama** | Runs as separate Docker container |
+| **Data** | Stored in Docker volumes (isolated) |
+| **Index** | Must be created with `--profile indexing` |
+| **Hot-reload** | ❌ No (code copied into image) |
+
+### `docker-compose.dev.yml` (Development / Local Index)
+
+**Best for:** Developers with existing local index (`qdrant_db/`) and Ollama on host.
+
+```bash
+docker-compose -f docker-compose.dev.yml up
+```
+
+| Aspect | Details |
+|--------|---------|
+| **Services** | 1 (only app) |
+| **Qdrant** | Uses local `./qdrant_db/` folder (mounted) |
+| **Ollama** | Connects to host's Ollama (`host.docker.internal:11434`) |
+| **Data** | Uses existing local files |
+| **Index** | Uses existing local index |
+| **Hot-reload** | ✅ Yes (source code mounted) |
+
+### Quick Reference
+
+| Scenario | Command |
+|----------|---------|
+| **You have local index + Ollama** | `docker-compose -f docker-compose.dev.yml up` |
+| **Fresh start (everything in Docker)** | `docker-compose up` |
+| **Build index in Docker** | `docker-compose --profile indexing up indexer` |
+| **Start only infrastructure** | `docker-compose up -d qdrant ollama` |
+| **No Docker (pure local)** | `uv run streamlit run src/knowledge_base_rag/app.py` |
+
+### Container Names
+
+| Compose File | Container Name | Port |
+|--------------|----------------|------|
+| `docker-compose.yml` | `rag-app` | 8501 |
+| `docker-compose.yml` | `rag-qdrant` | 6333 |
+| `docker-compose.yml` | `rag-ollama` | 11434 |
+| `docker-compose.dev.yml` | `rag-app-dev` | 8501 |
 
 ### Using Groq Instead of Ollama
 
