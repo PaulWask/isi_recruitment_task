@@ -334,3 +334,4 @@ uv run python -c "from knowledge_base_rag import __version__; print(__version__)
 Ready to start? Let's begin with **Commit 1: Project Setup**!
 
 
+

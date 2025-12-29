@@ -37,23 +37,23 @@ def main():
     test_docs = [
         Document(
             text="Machine learning is a subset of artificial intelligence.",
-            metadata={"source": "test1.txt", "topic": "ML"}
+            extra_info={"source": "test1.txt", "topic": "ML"}
         ),
         Document(
             text="Deep learning uses neural networks with many layers.",
-            metadata={"source": "test2.txt", "topic": "DL"}
+            extra_info={"source": "test2.txt", "topic": "DL"}
         ),
         Document(
             text="Natural language processing enables computers to understand text.",
-            metadata={"source": "test3.txt", "topic": "NLP"}
+            extra_info={"source": "test3.txt", "topic": "NLP"}
         ),
         Document(
             text="Computer vision allows machines to interpret images.",
-            metadata={"source": "test4.txt", "topic": "CV"}
+            extra_info={"source": "test4.txt", "topic": "CV"}
         ),
         Document(
             text="Reinforcement learning trains agents through rewards.",
-            metadata={"source": "test5.txt", "topic": "RL"}
+            extra_info={"source": "test5.txt", "topic": "RL"}
         ),
     ]
     print(f"   Created {len(test_docs)} test documents")

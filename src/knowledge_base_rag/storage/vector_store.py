@@ -172,11 +172,11 @@ class VectorStoreManager:
             if hasattr(info.config, 'params') and hasattr(info.config.params, 'vectors'):
                 vectors_config = info.config.params.vectors
                 if hasattr(vectors_config, 'size'):
-                    vector_size = vectors_config.size
+                    vector_size = getattr(vectors_config, 'size', None)
                 elif isinstance(vectors_config, dict):
                     first_config = next(iter(vectors_config.values()), None)
-                    if first_config and hasattr(first_config, 'size'):
-                        vector_size = first_config.size
+                    if first_config is not None:
+                        vector_size = getattr(first_config, 'size', None)
 
             # Handle different Qdrant client versions
             vectors_count = getattr(info, 'vectors_count', None)
