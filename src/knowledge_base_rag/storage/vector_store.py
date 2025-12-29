@@ -108,22 +108,30 @@ class VectorStoreManager:
         return QdrantClient(path=str(qdrant_path))
 
     def _create_cloud_client(self) -> QdrantClient:
-        """Create Qdrant Cloud client."""
-        # Validate configuration
+        """Create Qdrant Cloud/Server client.
+        
+        Supports both:
+        - Qdrant Cloud (requires API key)
+        - Self-hosted Qdrant (Docker, no API key needed)
+        """
         if not settings.qdrant_cloud_url:
             raise ValueError(
-                "QDRANT_CLOUD_URL required for cloud mode.\n"
-                "Get free cluster at: https://cloud.qdrant.io/"
+                "QDRANT_CLOUD_URL required for cloud/server mode.\n"
+                "For Docker: http://qdrant:6333\n"
+                "For Cloud: https://your-cluster.qdrant.io"
             )
-        if not settings.qdrant_cloud_api_key:
-            raise ValueError("QDRANT_CLOUD_API_KEY required for cloud mode.")
 
-        logger.info(f"Connecting to Qdrant Cloud: {settings.qdrant_cloud_url}")
+        logger.info(f"Connecting to Qdrant at: {settings.qdrant_cloud_url}")
 
-        return QdrantClient(
-            url=settings.qdrant_cloud_url,
-            api_key=settings.qdrant_cloud_api_key,
-        )
+        # API key is optional for self-hosted Qdrant (Docker)
+        if settings.qdrant_cloud_api_key:
+            return QdrantClient(
+                url=settings.qdrant_cloud_url,
+                api_key=settings.qdrant_cloud_api_key,
+            )
+        else:
+            # No API key = self-hosted Qdrant (Docker)
+            return QdrantClient(url=settings.qdrant_cloud_url)
 
     @property
     def vector_store(self) -> QdrantVectorStore:

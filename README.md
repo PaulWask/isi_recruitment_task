@@ -183,11 +183,76 @@ isi_recruitment_task/
 
 ## Docker (Production)
 
+### Quick Start with Docker
+
 ```bash
-# Build and run with Docker Compose
+# Build and run all services
 docker-compose up --build
 
 # Access at http://localhost:8501
+```
+
+### Docker Services
+
+| Service | Port | Description |
+|---------|------|-------------|
+| `app` | 8501 | Streamlit web application |
+| `qdrant` | 6333 | Vector database |
+| `ollama` | 11434 | Local LLM (optional) |
+
+### First-Time Setup with Docker
+
+**Option A: If you already indexed locally** (have `qdrant_db/` folder):
+
+```bash
+# Use development compose (mounts local qdrant_db/)
+docker-compose -f docker-compose.dev.yml up
+```
+
+**Option B: Fresh Docker environment** (no local index):
+
+```bash
+# 1. Start Qdrant and Ollama first
+docker-compose up -d qdrant ollama
+
+# 2. Pull the LLM model (if using Ollama)
+docker exec rag-ollama ollama pull llama3.2:3b
+
+# 3. Run indexing inside Docker (one-time, ~10-30 min)
+docker-compose --profile indexing up indexer
+
+# 4. Start the app
+docker-compose up app
+```
+
+### Development Mode
+
+For local development with hot-reload and existing local index:
+
+```bash
+docker-compose -f docker-compose.dev.yml up
+```
+
+**Differences between compose files:**
+
+| File | Qdrant | Ollama | Use Case |
+|------|--------|--------|----------|
+| `docker-compose.yml` | Docker container | Docker container | Production, fresh deploy |
+| `docker-compose.dev.yml` | Local `qdrant_db/` | Host's Ollama | Development, existing index |
+
+### Using Groq Instead of Ollama
+
+Edit `docker-compose.yml` or set environment variable:
+
+```bash
+GROQ_API_KEY=your-key docker-compose up
+```
+
+And change in `docker-compose.yml`:
+```yaml
+environment:
+  - LLM_SERVICE=groq
+  - GROQ_API_KEY=${GROQ_API_KEY}
 ```
 
 ## Development

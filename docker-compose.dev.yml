@@ -1,0 +1,56 @@
+# =============================================================================
+# Knowledge Base RAG - Development Docker Compose
+# =============================================================================
+# For local development with hot-reload and local Qdrant
+#
+# Run with: docker-compose -f docker-compose.dev.yml up
+# =============================================================================
+
+version: '3.8'
+
+services:
+  # ===========================================================================
+  # RAG Application (Development mode with volume mounts)
+  # ===========================================================================
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: rag-app-dev
+    ports:
+      - "8501:8501"
+    volumes:
+      # Mount source code for hot-reload
+      - ./src:/app/src:ro
+      - ./scripts:/app/scripts:ro
+      # Mount domain data
+      - ./domaindata:/app/domaindata:ro
+      # Mount local qdrant_db
+      - ./qdrant_db:/app/qdrant_db
+    environment:
+      # Use local Qdrant (in-process)
+      - VECTOR_DB=local
+      - QDRANT_PATH=/app/qdrant_db
+      
+      # LLM configuration
+      - LLM_SERVICE=${LLM_SERVICE:-local}
+      - OLLAMA_BASE_URL=http://host.docker.internal:11434
+      - GROQ_API_KEY=${GROQ_API_KEY:-}
+      
+      # RAG settings
+      - CHUNK_SIZE=1024
+      - CHUNK_OVERLAP=128
+      - SIMILARITY_TOP_K=6
+      - COLLECTION_NAME=knowledge_base
+      - KNOWLEDGE_BASE_DIR=/app/domaindata
+    # For accessing host's Ollama
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+# =============================================================================
+# Networks
+# =============================================================================
+networks:
+  default:
+    name: rag-dev-network
+
