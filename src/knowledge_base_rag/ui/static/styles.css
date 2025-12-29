@@ -1,0 +1,378 @@
+/* ==========================================================================
+   Knowledge Base RAG - Application Styles
+   ==========================================================================
+   Author: Knowledge Base RAG Team
+   Version: 1.0.0
+   Description: Main stylesheet for the Streamlit application
+   ========================================================================== */
+
+/* ==========================================================================
+   CSS Variables (Theme Configuration)
+   ========================================================================== */
+:root {
+    /* Primary colors */
+    --color-primary: #2c3e50;
+    --color-primary-light: #3498db;
+    --color-primary-dark: #1a252f;
+    
+    /* Background colors */
+    --color-bg-user: #e3f2fd;
+    --color-bg-assistant: #f8f9fa;
+    --color-bg-card: #ffffff;
+    --color-bg-warning: #fff3cd;
+    
+    /* Border colors */
+    --color-border-light: #dee2e6;
+    --color-border-medium: #adb5bd;
+    
+    /* Text colors */
+    --color-text-primary: #212529;
+    --color-text-secondary: #6c757d;
+    --color-text-muted: #495057;
+    
+    /* Status colors */
+    --color-score-high: #28a745;
+    --color-score-medium: #ffc107;
+    --color-score-low: #dc3545;
+    
+    /* Spacing */
+    --spacing-xs: 0.25rem;
+    --spacing-sm: 0.5rem;
+    --spacing-md: 1rem;
+    --spacing-lg: 1.5rem;
+    --spacing-xl: 2rem;
+    
+    /* Border radius */
+    --radius-sm: 0.25rem;
+    --radius-md: 0.5rem;
+    --radius-lg: 1rem;
+    
+    /* Shadows */
+    --shadow-sm: 0 1px 3px rgba(0,0,0,0.08);
+    --shadow-md: 0 4px 12px rgba(0,0,0,0.12);
+    --shadow-lg: 0 8px 24px rgba(0,0,0,0.16);
+}
+
+/* ==========================================================================
+   Typography & Base Styles
+   ========================================================================== */
+body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+/* ==========================================================================
+   Main Container
+   ========================================================================== */
+.main .block-container {
+    padding-top: var(--spacing-xl);
+    padding-bottom: var(--spacing-xl);
+}
+
+/* ==========================================================================
+   Header Styles
+   ========================================================================== */
+.main-header {
+    text-align: center;
+    padding: var(--spacing-md) 0 var(--spacing-xl) 0;
+}
+
+.main-header h1 {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    font-size: 2.5rem;
+    font-weight: 700;
+    margin: 0;
+}
+
+.main-header .subtitle,
+.main-header p {
+    color: var(--color-text-secondary);
+    font-size: 1.1rem;
+    margin-top: var(--spacing-sm);
+}
+
+/* ==========================================================================
+   Chat Messages
+   ========================================================================== */
+.user-message {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    padding: var(--spacing-md) var(--spacing-lg);
+    border-radius: var(--radius-lg) var(--radius-lg) var(--radius-sm) var(--radius-lg);
+    margin: var(--spacing-sm) 0;
+    max-width: 80%;
+    margin-left: auto;
+    box-shadow: var(--shadow-sm);
+}
+
+.assistant-message {
+    background: var(--color-bg-assistant);
+    border: 1px solid var(--color-border-light);
+    padding: var(--spacing-md) var(--spacing-lg);
+    border-radius: var(--radius-lg) var(--radius-lg) var(--radius-lg) var(--radius-sm);
+    margin: var(--spacing-sm) 0;
+    max-width: 90%;
+    box-shadow: var(--shadow-sm);
+}
+
+.message-content {
+    margin: 0;
+    white-space: pre-wrap;
+    line-height: 1.6;
+}
+
+/* ==========================================================================
+   Source Cards
+   ========================================================================== */
+.source-card {
+    background: var(--color-bg-card);
+    border: 1px solid var(--color-border-light);
+    border-radius: var(--radius-md);
+    padding: var(--spacing-md);
+    margin: var(--spacing-sm) 0;
+    font-size: 0.85rem;
+    box-shadow: var(--shadow-sm);
+    transition: all 0.2s ease;
+}
+
+.source-card:hover {
+    border-color: var(--color-primary-light);
+    box-shadow: var(--shadow-md);
+    transform: translateY(-2px);
+}
+
+.source-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: var(--spacing-sm);
+}
+
+.source-filename {
+    font-weight: 600;
+    color: var(--color-primary);
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-xs);
+    margin-top: var(--spacing-xs);
+}
+
+.source-filename .icon {
+    font-size: 1rem;
+}
+
+.source-text {
+    margin: var(--spacing-sm) 0;
+    color: var(--color-text-muted);
+    font-size: 0.85rem;
+    line-height: 1.6;
+    background: #f8f9fa;
+    padding: var(--spacing-md);
+    border-radius: var(--radius-sm);
+    border-left: 3px solid var(--color-primary-light);
+}
+
+.source-metadata {
+    color: var(--color-text-secondary);
+    font-size: 0.7rem;
+}
+
+.source-path {
+    font-family: 'Monaco', 'Consolas', 'Courier New', monospace;
+    font-size: 0.65rem;
+    color: var(--color-text-secondary);
+    word-break: break-all;
+    background: #f1f3f4;
+    padding: var(--spacing-xs) var(--spacing-sm);
+    border-radius: var(--radius-sm);
+    margin-top: var(--spacing-xs);
+    display: block;
+}
+
+/* ==========================================================================
+   Score Badges
+   ========================================================================== */
+.source-score {
+    display: inline-flex;
+    align-items: center;
+    padding: var(--spacing-xs) var(--spacing-sm);
+    border-radius: var(--radius-lg);
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+}
+
+.score-high {
+    background: linear-gradient(135deg, #d4edda 0%, #c3e6cb 100%);
+    color: #155724;
+    border: 1px solid var(--color-score-high);
+}
+
+.score-medium {
+    background: linear-gradient(135deg, #fff3cd 0%, #ffeeba 100%);
+    color: #856404;
+    border: 1px solid var(--color-score-medium);
+}
+
+.score-low {
+    background: linear-gradient(135deg, #f8d7da 0%, #f5c6cb 100%);
+    color: #721c24;
+    border: 1px solid var(--color-score-low);
+}
+
+/* ==========================================================================
+   Expandable Details
+   ========================================================================== */
+details {
+    margin-top: var(--spacing-sm);
+}
+
+details summary {
+    cursor: pointer;
+    user-select: none;
+    color: var(--color-text-secondary);
+    font-size: 0.75rem;
+    padding: var(--spacing-xs) 0;
+    display: inline-flex;
+    align-items: center;
+    gap: var(--spacing-xs);
+}
+
+details summary:hover {
+    color: var(--color-primary-light);
+}
+
+details summary::marker {
+    color: var(--color-primary-light);
+}
+
+details[open] summary {
+    margin-bottom: var(--spacing-sm);
+}
+
+/* ==========================================================================
+   Status Indicators
+   ========================================================================== */
+.status-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--spacing-xs);
+}
+
+.status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    display: inline-block;
+}
+
+.status-dot.online {
+    background: var(--color-score-high);
+    box-shadow: 0 0 8px rgba(40, 167, 69, 0.5);
+    animation: pulse 2s infinite;
+}
+
+.status-dot.offline {
+    background: var(--color-score-low);
+    box-shadow: 0 0 8px rgba(220, 53, 69, 0.5);
+}
+
+.status-label {
+    color: inherit;
+}
+
+.status-details {
+    color: var(--color-text-secondary);
+    font-size: 0.8rem;
+    font-weight: normal;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
+}
+
+/* ==========================================================================
+   Warning Box
+   ========================================================================== */
+.warning-box {
+    background: linear-gradient(135deg, #fff3cd 0%, #ffeeba 100%);
+    border: 1px solid var(--color-score-medium);
+    border-radius: var(--radius-md);
+    padding: var(--spacing-lg);
+    margin: var(--spacing-md) 0;
+}
+
+.warning-box h3 {
+    color: #856404;
+    margin: 0 0 var(--spacing-sm) 0;
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+}
+
+.warning-box p {
+    color: #856404;
+    margin: 0 0 var(--spacing-md) 0;
+}
+
+.warning-box code {
+    display: block;
+    background: white;
+    padding: var(--spacing-md);
+    border-radius: var(--radius-sm);
+    font-family: 'Monaco', 'Consolas', monospace;
+    color: #856404;
+    overflow-x: auto;
+}
+
+/* ==========================================================================
+   Responsive Design
+   ========================================================================== */
+@media (max-width: 768px) {
+    .user-message,
+    .assistant-message {
+        max-width: 95%;
+        padding: var(--spacing-sm) var(--spacing-md);
+    }
+    
+    .source-card {
+        padding: var(--spacing-sm);
+    }
+    
+    .source-text {
+        font-size: 0.8rem;
+        padding: var(--spacing-sm);
+    }
+    
+    .main-header h1 {
+        font-size: 1.8rem;
+    }
+}
+
+/* ==========================================================================
+   Accessibility
+   ========================================================================== */
+@media (prefers-reduced-motion: reduce) {
+    .source-card,
+    .status-dot {
+        transition: none;
+        animation: none;
+    }
+}
+
+/* High contrast mode support */
+@media (prefers-contrast: high) {
+    .source-card {
+        border-width: 2px;
+    }
+    
+    .score-high,
+    .score-medium,
+    .score-low {
+        border-width: 2px;
+    }
+}
+

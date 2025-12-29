@@ -25,6 +25,13 @@ from knowledge_base_rag.core.llm import get_llm, is_ollama_available
 from knowledge_base_rag.engine.rag import RAGEngine, RAGResponse
 from knowledge_base_rag.storage.vector_store import VectorStoreManager
 from knowledge_base_rag.storage.embeddings import get_embed_model
+from knowledge_base_rag.ui import (
+    load_css,
+    render_source_card,
+    render_user_message,
+    render_assistant_message,
+    render_header as render_header_html,
+)
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -38,76 +45,8 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# Custom CSS for better styling
-st.markdown("""
-<style>
-    /* Main container */
-    .main .block-container {
-        padding-top: 2rem;
-        padding-bottom: 2rem;
-    }
-    
-    /* Chat messages */
-    .user-message {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: white;
-        padding: 1rem 1.5rem;
-        border-radius: 1rem 1rem 0.25rem 1rem;
-        margin: 0.5rem 0;
-        max-width: 80%;
-        margin-left: auto;
-    }
-    
-    .assistant-message {
-        background: #f8f9fa;
-        border: 1px solid #e9ecef;
-        padding: 1rem 1.5rem;
-        border-radius: 1rem 1rem 1rem 0.25rem;
-        margin: 0.5rem 0;
-        max-width: 90%;
-    }
-    
-    /* Source cards */
-    .source-card {
-        background: #ffffff;
-        border: 1px solid #dee2e6;
-        border-radius: 0.5rem;
-        padding: 0.75rem;
-        margin: 0.25rem 0;
-        font-size: 0.85rem;
-    }
-    
-    .source-score {
-        display: inline-block;
-        padding: 0.2rem 0.5rem;
-        border-radius: 0.25rem;
-        font-size: 0.75rem;
-        font-weight: 600;
-    }
-    
-    .score-high { background: #d4edda; color: #155724; }
-    .score-medium { background: #fff3cd; color: #856404; }
-    .score-low { background: #f8d7da; color: #721c24; }
-    
-    /* Status indicators */
-    .status-online { color: #28a745; }
-    .status-offline { color: #dc3545; }
-    
-    /* Header styling */
-    .main-header {
-        text-align: center;
-        padding: 1rem 0 2rem 0;
-    }
-    
-    .main-header h1 {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        font-size: 2.5rem;
-        font-weight: 700;
-    }
-</style>
-""", unsafe_allow_html=True)
+# Load CSS from external file (src/knowledge_base_rag/ui/static/styles.css)
+st.markdown(load_css(), unsafe_allow_html=True)
 
 
 # =============================================================================
@@ -237,57 +176,43 @@ def render_sidebar():
 
 
 def render_header():
-    """Render the main header."""
-    st.markdown("""
-    <div class="main-header">
-        <h1>📚 Knowledge Base Q&A</h1>
-        <p style="color: #6c757d; font-size: 1.1rem;">
-            Ask questions about your domain documents
-        </p>
-    </div>
-    """, unsafe_allow_html=True)
+    """Render the main header using UI component."""
+    st.markdown(render_header_html(), unsafe_allow_html=True)
 
 
-def render_message(role: str, content: str, sources: list = None, show_sources: bool = True):
-    """Render a chat message with optional sources."""
+def render_message(role: str, content: str, sources: list | None = None, show_sources: bool = True):
+    """Render a chat message with optional sources using UI components."""
     if role == "user":
-        st.markdown(f"""
-        <div class="user-message">
-            {content}
-        </div>
-        """, unsafe_allow_html=True)
+        st.markdown(render_user_message(content), unsafe_allow_html=True)
     else:
-        st.markdown(f"""
-        <div class="assistant-message">
-            {content}
-        </div>
-        """, unsafe_allow_html=True)
+        st.markdown(render_assistant_message(content), unsafe_allow_html=True)
         
         # Show sources if available
         if sources and show_sources:
             with st.expander(f"📚 Sources ({len(sources)})", expanded=False):
-                for i, src in enumerate(sources, 1):
+                for src in sources:
                     score = src.get("score", 0)
-                    source_name = src.get("source", "Unknown")
-                    text_preview = src.get("text", "")[:200]
+                    metadata = src.get("metadata", {})
                     
-                    # Color based on score
-                    if score >= 0.7:
-                        score_class = "score-high"
-                    elif score >= 0.4:
-                        score_class = "score-medium"
-                    else:
-                        score_class = "score-low"
+                    # Extract source info from metadata
+                    source_path = metadata.get("source", src.get("source", "Unknown"))
+                    file_name = metadata.get("file_name", source_path.split("/")[-1] if "/" in source_path else source_path)
+                    page_label = metadata.get("page_label")
+                    file_type = metadata.get("file_type", "")
+                    text_preview = src.get("text", "")[:300]
                     
-                    st.markdown(f"""
-                    <div class="source-card">
-                        <span class="source-score {score_class}">{score:.0%}</span>
-                        <strong>{source_name}</strong>
-                        <p style="margin: 0.5rem 0 0 0; color: #6c757d; font-size: 0.8rem;">
-                            {text_preview}...
-                        </p>
-                    </div>
-                    """, unsafe_allow_html=True)
+                    # Use UI component for source card
+                    st.markdown(
+                        render_source_card(
+                            score=score,
+                            file_name=file_name,
+                            source_path=source_path,
+                            text_preview=text_preview,
+                            page_label=page_label,
+                            file_type=file_type,
+                        ),
+                        unsafe_allow_html=True
+                    )
 
 
 def render_chat_history(show_sources: bool):
