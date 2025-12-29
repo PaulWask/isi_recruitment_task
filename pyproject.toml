@@ -1,0 +1,69 @@
+[project]
+name = "knowledge-base-rag"
+version = "0.1.0"
+description = "Pure RAG - 750MB Domain Knowledge Base"
+authors = [{name = "Pawel Waskiewicz"}]
+dependencies = [
+    # LlamaIndex core and extensions
+    "llama-index-core>=0.10.30,<0.12",
+    "llama-index-readers-file>=0.1.0,<0.2",
+    "llama-index-vector-stores-qdrant>=0.2.0,<0.3",
+    "llama-index-embeddings-huggingface>=0.2.0,<0.3",
+    "llama-index-llms-ollama>=0.1.0,<0.4",
+    "llama-index-llms-groq>=0.1.0,<0.3",
+    
+    # Vector DB
+    "qdrant-client>=1.9.0,<2.0",
+    
+    # Web UI
+    "streamlit>=1.35.0,<2.0",
+    
+    # Document processing (no C++ build required)
+    "sentence-transformers>=2.6.0,<3.0.0",
+    "pypdf>=4.0.0",
+    "python-docx>=1.0.0",
+    "python-pptx>=0.6.0",
+    "openpyxl>=3.1.0",
+    "beautifulsoup4>=4.12.0",
+    "lxml>=5.0.0",
+    "markdown>=3.5.0",
+    
+    # Configuration
+    "pydantic-settings>=2.0.0,<3.0",
+    "python-dotenv>=1.0.0",
+    
+    # AWS S3 access
+    "boto3>=1.34.0",
+    
+    # HTTP client
+    "httpx>=0.27.0",
+]
+requires-python = ">=3.11,<3.15"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "black>=24.0.0",
+    "isort>=5.13.0",
+    "mypy>=1.10.0",
+    "pre-commit>=3.7.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/knowledge_base_rag"]
+
+[tool.black]
+line-length = 88
+target-version = ["py311"]
+
+[tool.isort]
+profile = "black"
+line_length = 88
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
