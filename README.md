@@ -157,6 +157,9 @@ isi_recruitment_task/
 ├── .env.example            # Configuration template
 ├── README.md               # This file
 ├── DEVELOPMENT_PLAN.md     # Development roadmap
+├── Dockerfile              # Multi-stage Docker build
+├── docker-compose.yml      # Production deployment
+├── docker-compose.dev.yml  # Development with local index
 ├── domaindata/             # 750MB documents (gitignored)
 ├── qdrant_db/              # Vector database (gitignored)
 ├── scripts/
@@ -167,7 +170,7 @@ isi_recruitment_task/
 └── src/knowledge_base_rag/
     ├── __init__.py
     ├── cli.py              # CLI entry points (kb-index, kb-app)
-    ├── app.py              # Streamlit web app (Commit 11)
+    ├── app.py              # Streamlit web app
     ├── core/
     │   ├── config.py       # Pydantic settings
     │   └── llm.py          # Ollama/Groq LLM service
@@ -177,8 +180,40 @@ isi_recruitment_task/
     ├── storage/
     │   ├── embeddings.py   # HuggingFace embeddings
     │   └── vector_store.py # Qdrant vector store
-    └── engine/
-        └── rag.py          # RAG query pipeline
+    ├── engine/
+    │   └── rag.py          # RAG query pipeline
+    └── ui/                 # UI components module
+        ├── __init__.py     # Exports all components
+        ├── styles.py       # CSS loader + color constants
+        ├── components.py   # HTML rendering functions
+        └── static/
+            ├── styles.css  # Main stylesheet (CSS variables, responsive)
+            └── templates/  # HTML template files
+                ├── source_card.html
+                ├── user_message.html
+                ├── assistant_message.html
+                ├── header.html
+                ├── warning.html
+                └── status_indicator.html
+```
+
+### UI Module
+
+The `ui/` module provides a professional, modular UI system:
+
+| File | Purpose |
+|------|---------|
+| `styles.py` | `load_css()` function, `COLORS` dict |
+| `components.py` | `render_*()` functions that load HTML templates |
+| `static/styles.css` | 380+ lines of CSS with variables, responsive design |
+| `static/templates/*.html` | 6 HTML template files for components |
+
+**Usage in app.py:**
+```python
+from knowledge_base_rag.ui import load_css, render_source_card
+
+st.markdown(load_css(), unsafe_allow_html=True)
+st.markdown(render_source_card(...), unsafe_allow_html=True)
 ```
 
 ## Docker (Production)
