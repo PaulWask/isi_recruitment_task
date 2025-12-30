@@ -236,3 +236,6 @@ huggingface/
 
 # Chat history (persisted between sessions)
 chat_history.json
+
+# NLTK data cache (downloaded during indexing)
+.nltk_data/

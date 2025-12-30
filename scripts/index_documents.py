@@ -31,6 +31,51 @@ from knowledge_base_rag.data.processor import DocumentProcessor
 from knowledge_base_rag.storage.embeddings import get_embed_model
 from knowledge_base_rag.storage.vector_store import VectorStoreManager
 
+
+def ensure_nltk_data():
+    """Pre-download NLTK data to avoid runtime downloads.
+    
+    Downloads all NLTK packages required by LlamaIndex:
+    - punkt_tab: Tokenizer for sentence splitting
+    - averaged_perceptron_tagger: POS tagging (sometimes needed)
+    
+    Data is stored in .nltk_data/ in the project root for portability.
+    """
+    import os
+    import nltk
+    
+    # Set NLTK to download to a local cache in project root
+    nltk_data_dir = Path(__file__).parent.parent / ".nltk_data"
+    nltk_data_dir.mkdir(exist_ok=True)
+    
+    # Set environment variable so LlamaIndex finds it
+    os.environ["NLTK_DATA"] = str(nltk_data_dir)
+    
+    # Also add to NLTK's search path
+    if str(nltk_data_dir) not in nltk.data.path:
+        nltk.data.path.insert(0, str(nltk_data_dir))
+    
+    # Packages required by LlamaIndex for text processing
+    required_packages = [
+        ("tokenizers/punkt_tab", "punkt_tab"),
+        ("taggers/averaged_perceptron_tagger_eng", "averaged_perceptron_tagger_eng"),
+    ]
+    
+    print(f"📁 NLTK data directory: {nltk_data_dir}")
+    
+    for data_path, package_name in required_packages:
+        try:
+            nltk.data.find(data_path)
+            print(f"  ✅ {package_name}: already downloaded")
+        except LookupError:
+            print(f"  📦 {package_name}: downloading...")
+            try:
+                nltk.download(package_name, download_dir=str(nltk_data_dir), quiet=True)
+                print(f"  ✅ {package_name}: downloaded successfully")
+            except Exception as e:
+                print(f"  ⚠️ {package_name}: download failed ({e}), will retry at runtime")
+
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -579,6 +624,9 @@ def run_indexing(
 
 def main():
     """Main entry point."""
+    # Pre-download NLTK data (one-time, speeds up subsequent app starts)
+    ensure_nltk_data()
+    
     parser = argparse.ArgumentParser(
         description="Index documents into the vector store",
         formatter_class=argparse.RawDescriptionHelpFormatter,

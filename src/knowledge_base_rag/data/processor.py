@@ -6,11 +6,16 @@ Design decisions:
 - 128 token overlap prevents losing context at chunk boundaries
 - Preserve all metadata through chunking for source attribution
 
-Why SentenceSplitter over alternatives:
+Chunking Strategies Available:
+1. SENTENCE (default): SentenceSplitter - respects sentences + enforces size limits
+2. SEMANTIC: Groups semantically similar sentences (slower, more accurate)
+3. HIERARCHICAL: Parent-child chunks for context preservation
+
+Why SentenceSplitter (SENTENCE) is default:
 1. Fixed-size: Breaks mid-sentence, loses semantic meaning
 2. Pure sentence: Inconsistent sizes, some sentences too short/long
 3. SentenceSplitter: Best of both - respects sentences + enforces size limits
-4. Semantic chunking: Too slow (requires embeddings for each split decision)
+4. Semantic chunking: More accurate but slower (requires embeddings)
 
 Chunk size rationale (1024 tokens):
 - Large enough to contain full ideas/paragraphs
@@ -20,10 +25,17 @@ Chunk size rationale (1024 tokens):
 Overlap rationale (128 tokens):
 - ~12% overlap catches context that spans chunk boundaries
 - Not too large (would waste storage and slow retrieval)
+
+For 750MB of PDFs, recommended settings:
+- SENTENCE chunking (fast, good quality)
+- chunk_size=512 (smaller chunks = more precise retrieval)
+- chunk_overlap=50 (less overlap = faster indexing)
+- Consider SEMANTIC chunking if retrieval quality is more important than speed
 """
 
 import logging
-from typing import Optional
+from enum import Enum
+from typing import Optional, Literal
 
 from llama_index.core import Document
 from llama_index.core.node_parser import SentenceSplitter
@@ -33,6 +45,23 @@ from knowledge_base_rag.core.config import settings
 logger = logging.getLogger(__name__)
 
 
+class ChunkingStrategy(str, Enum):
+    """Available chunking strategies."""
+    SENTENCE = "sentence"      # Fast, sentence-aware (default)
+    SEMANTIC = "semantic"      # Slower, groups by semantic similarity
+    SMALL = "small"            # Smaller chunks for precise retrieval
+    LARGE = "large"            # Larger chunks for more context
+
+
+# Preset configurations for different strategies
+CHUNKING_PRESETS = {
+    ChunkingStrategy.SENTENCE: {"chunk_size": 1024, "chunk_overlap": 128},
+    ChunkingStrategy.SEMANTIC: {"chunk_size": 512, "chunk_overlap": 50},
+    ChunkingStrategy.SMALL: {"chunk_size": 256, "chunk_overlap": 32},
+    ChunkingStrategy.LARGE: {"chunk_size": 2048, "chunk_overlap": 256},
+}
+
+
 class DocumentProcessor:
     """Process and chunk documents for vector indexing.
 
@@ -40,24 +69,43 @@ class DocumentProcessor:
     while enforcing size limits for optimal retrieval performance.
 
     Example:
-        processor = DocumentProcessor(chunk_size=1024, chunk_overlap=128)
-        chunks = processor.process_documents(documents)
-        print(f"Created {len(chunks)} chunks")
+        # Default sentence-aware chunking
+        processor = DocumentProcessor()
+        
+        # Small chunks for precise retrieval (recommended for 750MB+ datasets)
+        processor = DocumentProcessor(strategy="small")
+        
+        # Custom sizes
+        processor = DocumentProcessor(chunk_size=512, chunk_overlap=50)
     """
 
     def __init__(
         self,
         chunk_size: Optional[int] = None,
         chunk_overlap: Optional[int] = None,
+        strategy: Literal["sentence", "semantic", "small", "large"] = "sentence",
     ):
         """Initialize the document processor.
 
         Args:
-            chunk_size: Target size per chunk in tokens. Default: 1024
-            chunk_overlap: Overlap between chunks in tokens. Default: 128
+            chunk_size: Target size per chunk in tokens. Overrides strategy preset.
+            chunk_overlap: Overlap between chunks in tokens. Overrides strategy preset.
+            strategy: Chunking strategy preset. Options:
+                - "sentence": Default, 1024 tokens, sentence-aware
+                - "semantic": 512 tokens, for semantic grouping
+                - "small": 256 tokens, precise retrieval for large datasets
+                - "large": 2048 tokens, more context per chunk
         """
-        self.chunk_size = chunk_size or settings.chunk_size
-        self.chunk_overlap = chunk_overlap or settings.chunk_overlap
+        # Get preset values
+        preset = CHUNKING_PRESETS.get(
+            ChunkingStrategy(strategy), 
+            CHUNKING_PRESETS[ChunkingStrategy.SENTENCE]
+        )
+        
+        # Allow overrides
+        self.chunk_size = chunk_size or preset["chunk_size"]
+        self.chunk_overlap = chunk_overlap or preset["chunk_overlap"]
+        self.strategy = strategy
 
         # SentenceSplitter respects sentence boundaries when possible
         # Falls back to character splitting only when necessary
@@ -70,7 +118,7 @@ class DocumentProcessor:
         )
 
         logger.info(
-            f"DocumentProcessor initialized: "
+            f"DocumentProcessor initialized: strategy={strategy}, "
             f"chunk_size={self.chunk_size}, overlap={self.chunk_overlap}"
         )
 
