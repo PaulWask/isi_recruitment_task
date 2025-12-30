@@ -61,21 +61,6 @@ if TYPE_CHECKING:
 # Chat history persistence file
 CHAT_HISTORY_FILE = Path("chat_history.json")
 
-# Server-level cache flag (persists across browser refreshes and st.rerun())
-# Using a cached function instead of a global variable because globals reset on st.rerun()
-@st.cache_resource
-def _get_server_init_marker():
-    """Return a mutable container that persists across st.rerun() calls."""
-    return {"loaded": False}
-
-def is_server_initialized():
-    """Check if server resources have been initialized."""
-    return _get_server_init_marker()["loaded"]
-
-def set_server_initialized():
-    """Mark server resources as initialized."""
-    _get_server_init_marker()["loaded"] = True
-
 # Configure logging with professional timestamp format (HH:MM:SS.mmm)
 logging.basicConfig(
     level=logging.INFO,
@@ -97,52 +82,62 @@ st.markdown(load_css(), unsafe_allow_html=True)
 
 
 # =============================================================================
-# Cached Resources (persist across page refreshes AND sessions)
-# LAZY IMPORTS: Heavy modules loaded only when first needed
+# Cached Resources - Using session_state for reliability
+# Note: @st.cache_resource can fail in Docker/WSL environments
 # =============================================================================
 
-@st.cache_resource(show_spinner=False)
 def get_cached_rag_engine():
-    """Get cached RAG engine - initialized ONCE per server lifetime."""
-    # Lazy import to avoid blocking UI
-    from knowledge_base_rag.engine.rag import RAGEngine
-    logger.info("🚀 Initializing RAG engine (first time only)...")
-    return RAGEngine()
+    """Get RAG engine from session state (initialized once per session)."""
+    if "_rag_engine" not in st.session_state:
+        from knowledge_base_rag.engine.rag import RAGEngine
+        logger.info("🚀 Initializing RAG engine...")
+        st.session_state._rag_engine = RAGEngine()
+    return st.session_state._rag_engine
 
 
-@st.cache_resource(show_spinner=False)
 def get_cached_embed_model():
-    """Get cached embedding model - loaded ONCE per server lifetime."""
-    # Lazy import
-    from knowledge_base_rag.storage.embeddings import get_embed_model
-    logger.info("🚀 Loading embedding model (first time only)...")
-    return get_embed_model()
+    """Get embedding model from session state (initialized once per session)."""
+    if "_embed_model" not in st.session_state:
+        from knowledge_base_rag.storage.embeddings import get_embed_model
+        logger.info("🚀 Loading embedding model...")
+        st.session_state._embed_model = get_embed_model()
+    return st.session_state._embed_model
 
 
-@st.cache_resource(show_spinner=False)
 def get_cached_vector_store_stats() -> dict:
-    """Get cached vector store stats - checked ONCE per server lifetime."""
-    # Lazy import
-    from knowledge_base_rag.storage.vector_store import VectorStoreManager
-    logger.info("🚀 Checking vector store (first time only)...")
-    try:
-        embed_model = get_cached_embed_model()
-        manager = VectorStoreManager(embed_model=embed_model)
-        stats = manager.get_stats()
-        stats["_cached"] = True
-        return stats
-    except Exception as e:
-        logger.error(f"Vector store check failed: {e}")
-        return {"exists": False, "vectors_count": 0, "_cached": True}
+    """Get vector store stats from session state (initialized once per session)."""
+    if "_vs_stats" not in st.session_state:
+        from knowledge_base_rag.storage.vector_store import VectorStoreManager
+        logger.info("🚀 Checking vector store...")
+        try:
+            embed_model = get_cached_embed_model()
+            manager = VectorStoreManager(embed_model=embed_model)
+            stats = manager.get_stats()
+            stats["_cached"] = True
+            st.session_state._vs_stats = stats
+        except Exception as e:
+            logger.error(f"Vector store check failed: {e}")
+            st.session_state._vs_stats = {"exists": False, "vectors_count": 0, "_cached": True}
+    return st.session_state._vs_stats
 
 
-@st.cache_data(ttl=60, show_spinner=False)  # Cache for 60 seconds
 def check_ollama_status() -> bool:
-    """Check Ollama status - cached to avoid spamming HTTP requests."""
-    # Lazy import
+    """Check Ollama status (cached in session state with TTL)."""
+    now = time.time()
+    cache_key = "_ollama_status"
+    cache_time_key = "_ollama_status_time"
+    
+    # Cache for 60 seconds
+    if cache_key in st.session_state:
+        last_check = st.session_state.get(cache_time_key, 0)
+        if now - last_check < 60:
+            return st.session_state[cache_key]
+    
     from knowledge_base_rag.core.llm import is_ollama_available
-    logger.debug("Checking Ollama status...")
-    return is_ollama_available()
+    result = is_ollama_available()
+    st.session_state[cache_key] = result
+    st.session_state[cache_time_key] = now
+    return result
 
 
 def check_system_ready() -> tuple[bool, dict]:
@@ -217,11 +212,12 @@ def do_initialization():
     """Perform initialization synchronously (no UI updates during init).
     
     This avoids Streamlit's client-server synchronization delays.
+    All resources are cached in st.session_state for reliability.
     """
     logger.info("🎬 Initializing all components...")
     
     try:
-        # Initialize all cached resources
+        # Initialize all resources (cached in session_state)
         vs_stats = get_cached_vector_store_stats()
         st.session_state.rag_engine = get_cached_rag_engine()
         
@@ -237,9 +233,8 @@ def do_initialization():
         logger.exception(e)
         st.session_state.engine_ready = False
     
-    # Mark as initialized
+    # Mark as initialized (persists for this session)
     st.session_state.initialized = True
-    set_server_initialized()
 
 
 def get_rag_engine():
@@ -654,14 +649,13 @@ ollama pull llama3.2:3b
 
 def main():
     """Main application entry point."""
-    # Show loading indicator IMMEDIATELY (before any processing)
-    # This is the first thing the user sees
+    # Initialize session state first
+    init_session_state()
+    
+    # Show loading indicator if not initialized yet
     loading_placeholder = st.empty()
     
-    # Check initialization state
-    needs_init = not st.session_state.get("initialized", False) and not is_server_initialized()
-    
-    if needs_init:
+    if not st.session_state.initialized:
         # First load - show loading message with animated spinner
         loading_placeholder.markdown("""
         <style>
@@ -675,25 +669,10 @@ def main():
             <div style="width:40px; height:40px; border:4px solid rgba(102,126,234,0.2); border-top-color:#667eea; border-radius:50%; margin-top:1.5rem; animation: kb-spin 1s linear infinite;"></div>
         </div>
         """, unsafe_allow_html=True)
-    
-    init_session_state()
-    
-    # Fast path: if already initialized in this session, skip all checks
-    if st.session_state.initialized:
-        pass  # Continue to render UI
-    else:
-        # Check if we have a cached marker (set by previous initialization)
-        if is_server_initialized():
-            # Resources already cached at server level - very fast init
-            logger.info("⚡ Fast refresh - using cached resources...")
-            vs_stats = get_cached_vector_store_stats()
-            st.session_state.rag_engine = get_cached_rag_engine()
-            st.session_state.engine_ready = vs_stats.get("exists", False) and vs_stats.get("vectors_count", 0) > 0
-            st.session_state.initialized = True
-        else:
-            # First load - do initialization synchronously
-            logger.info("📦 First load - initializing...")
-            do_initialization()
+        
+        # Do initialization
+        logger.info("📦 Initializing session...")
+        do_initialization()
     
     # Clear loading placeholder now that we're ready
     loading_placeholder.empty()
@@ -776,8 +755,7 @@ def main():
         # Save chat history to file (persists across refreshes)
         save_chat_history()
         
-        # Rerun to update sidebar with new query count
-        st.rerun()
+        # Note: No st.rerun() needed - sidebar updates automatically on next interaction
 
 
 # Streamlit runs the entire script on each interaction

@@ -31,11 +31,11 @@ services:
       # Mount source code for hot-reload
       - ./src:/app/src:ro
       - ./scripts:/app/scripts:ro
-      # Mount Streamlit config (disables file watching for stable caching)
-      - ./.streamlit:/app/.streamlit:ro
       # Mount local qdrant_db (contains indexed vectors + text chunks)
       # Note: domaindata/ is NOT needed at runtime - only for indexing
       - ./qdrant_db:/app/qdrant_db
+      # Persist chat history across container restarts
+      - ./chat_history.json:/app/chat_history.json
     environment:
       # Use local Qdrant (in-process)
       - VECTOR_DB=local
@@ -53,6 +53,12 @@ services:
       - CHUNK_OVERLAP=128
       - SIMILARITY_TOP_K=6
       - COLLECTION_NAME=knowledge_base
+      
+      # Streamlit configuration (inline - no need for separate config file)
+      - STREAMLIT_SERVER_FILE_WATCHER_TYPE=none
+      - STREAMLIT_SERVER_HEADLESS=true
+      - STREAMLIT_BROWSER_GATHER_USAGE_STATS=false
+      - STREAMLIT_RUNNER_FAST_RERUNS=true
     # For accessing host's Ollama
     extra_hosts:
       - "host.docker.internal:host-gateway"

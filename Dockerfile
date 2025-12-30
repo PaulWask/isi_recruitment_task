@@ -60,7 +60,6 @@ ENV PYTHONPATH="/app/src:$PYTHONPATH"
 COPY --chown=appuser:appuser src/ ./src/
 COPY --chown=appuser:appuser scripts/ ./scripts/
 COPY --chown=appuser:appuser pyproject.toml ./
-COPY --chown=appuser:appuser .streamlit/ ./.streamlit/
 
 # Create directories for data (will be mounted as volumes)
 RUN mkdir -p /app/domaindata /app/qdrant_db \
@@ -75,6 +74,9 @@ ENV STREAMLIT_SERVER_PORT=8501
 ENV STREAMLIT_SERVER_ADDRESS=0.0.0.0
 ENV STREAMLIT_SERVER_HEADLESS=true
 ENV STREAMLIT_BROWSER_GATHER_USAGE_STATS=false
+# Disable file watcher for stable caching (critical for Docker)
+ENV STREAMLIT_SERVER_FILE_WATCHER_TYPE=none
+ENV STREAMLIT_RUNNER_FAST_RERUNS=true
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
