@@ -427,58 +427,19 @@ class RAGEngine:
         """
         top_k = similarity_top_k or self.similarity_top_k
         
-        # Create retriever
+        # Create retriever (used only for vector search, not response generation)
         retriever = VectorIndexRetriever(
             index=self.index,
             similarity_top_k=top_k,
         )
         
-        # Professional financial analyst prompt - grounded in source documents
-        qa_prompt = PromptTemplate(
-            """You are a Senior Financial Analyst with 20+ years of experience in central banking, monetary policy, emerging markets, and economic research. You have deep expertise in:
-
-- Macroeconomics: GDP, inflation (CPI, CCPI, PPI), employment, trade balances
-- Monetary Policy: Interest rates, reserve requirements, open market operations
-- Financial Markets: Equities, bonds, forex, commodities, derivatives
-- Emerging Markets: Country risk, capital flows, currency dynamics
-- Trade & Tariffs: Import/export duties, trade agreements, protectionism
-- Raw Materials: Commodity prices, supply chains, resource economics
-
-YOUR TASK: Answer questions using ONLY the provided source documents.
-
-CRITICAL RULES:
-1. GROUND your answer in the provided context - cite specific data points
-2. Use EXACT terminology from sources (e.g., "CCPI" not "CPI" if document says "CCPI")
-3. Include specific numbers, dates, percentages, and time periods when available
-4. If data is provisional or estimated, mention it (e.g., "provisional data shows...")
-5. Compare periods when relevant (e.g., "increased from X% in July to Y% in August")
-6. If the context doesn't contain sufficient information, clearly state: "The provided documents do not contain specific information about [topic]."
-7. Never invent or assume data - only use what's explicitly in the sources
-8. When multiple sources exist, synthesize them coherently
-9. For numerical data, maintain precision (don't round unless the source does)
-10. Identify the source institution when mentioned (e.g., "According to the Central Bank...")
-
-RESPONSE FORMAT:
-- Lead with the direct answer to the question
-- Support with specific data from the sources
-- Note any caveats, time periods, or methodology if mentioned
-- Keep response focused and professional
-
-Context from knowledge base:
----------------------
-{context_str}
----------------------
-
-Question: {query_str}
-
-Answer: """
-        )
-        
-        # Create response synthesizer with custom prompt
+        # Note: Response generation now uses _get_qa_prompt() directly in query()
+        # This query engine is primarily used for retrieval; we synthesize responses
+        # separately using our enhanced/reranked sources
         response_synthesizer = get_response_synthesizer(
             llm=self.llm,
             response_mode=ResponseMode.COMPACT,
-            text_qa_template=qa_prompt,
+            text_qa_template=self._get_qa_prompt(),  # Single source of truth
         )
         
         # Create query engine
@@ -600,9 +561,6 @@ Answer: """
         sorted_nodes = sorted(all_nodes.values(), key=lambda x: x[1], reverse=True)
         source_nodes = [n[0] for n in sorted_nodes[:fetch_k]]
         
-        # Get response (use first query for answer generation)
-        response = query_engine.query(question)
-        
         retrieval_time = (time.perf_counter() - retrieval_start) * 1000
         
         # Apply reranking if enabled
@@ -667,6 +625,34 @@ Answer: """
                 scores.append(score)
                 unique_sources.add(source_file)
         
+        # Generate answer using the ENHANCED sources (not a fresh retrieval)
+        # This is critical: we pass our reranked/hybrid sources to the LLM
+        logger.info(f"Generating answer from {len(sources)} enhanced sources...")
+        generation_start = time.perf_counter()
+        
+        # Use response synthesizer with our enhanced context
+        from llama_index.core.schema import NodeWithScore, TextNode
+        enhanced_nodes = []
+        for s in sources[:self.similarity_top_k]:
+            node = TextNode(text=s["text"])
+            node.metadata = s.get("metadata", {})
+            enhanced_nodes.append(NodeWithScore(node=node, score=s["score"]))
+        
+        # Create synthesizer and generate response
+        response_synthesizer = get_response_synthesizer(
+            llm=self.llm,
+            response_mode=ResponseMode.COMPACT,  # COMPACT works well when we control the sources
+            text_qa_template=self._get_qa_prompt(),
+        )
+        
+        response = response_synthesizer.synthesize(
+            query=question,
+            nodes=enhanced_nodes,
+        )
+        
+        generation_time = (time.perf_counter() - generation_start) * 1000
+        logger.info(f"Answer generated in {generation_time:.0f}ms")
+        
         # End-to-end time
         e2e_time = (time.perf_counter() - start_time) * 1000  # ms
         
@@ -707,6 +693,48 @@ Answer: """
         )
         
         return rag_response
+    
+    def _get_qa_prompt(self) -> PromptTemplate:
+        """Get the QA prompt template for answer generation."""
+        return PromptTemplate(
+            """You are a Senior Financial Analyst with 20+ years of experience in central banking, monetary policy, emerging markets, and economic research. You have deep expertise in:
+
+- Macroeconomics: GDP, inflation (CPI, CCPI, PPI), employment, trade balances
+- Monetary Policy: Interest rates, reserve requirements, open market operations
+- Financial Markets: Equities, bonds, forex, commodities, derivatives
+- Emerging Markets: Country risk, capital flows, currency dynamics
+- Trade & Tariffs: Import/export duties, trade agreements, protectionism
+- Raw Materials: Commodity prices, supply chains, resource economics
+
+YOUR TASK: Answer questions using ONLY the provided source documents.
+
+CRITICAL RULES:
+1. GROUND your answer in the provided context - cite specific data points
+2. Use EXACT terminology from sources (e.g., "CCPI" not "CPI" if document says "CCPI")
+3. Include specific numbers, dates, percentages, and time periods when available
+4. If data is provisional or estimated, mention it (e.g., "provisional data shows...")
+5. Compare periods when relevant (e.g., "increased from X% in July to Y% in August")
+6. If the context doesn't contain sufficient information, clearly state: "The provided documents do not contain specific information about [topic]."
+7. Never invent or assume data - only use what's explicitly in the sources
+8. When multiple sources exist, synthesize them coherently
+9. For numerical data, maintain precision (don't round unless the source does)
+10. Identify the source institution when mentioned (e.g., "According to the Central Bank...")
+
+RESPONSE FORMAT:
+- Lead with the direct answer to the question
+- Support with specific data from the sources
+- Note any caveats, time periods, or methodology if mentioned
+- Keep response focused and professional
+
+Context from knowledge base:
+---------------------
+{context_str}
+---------------------
+
+Question: {query_str}
+
+Answer: """
+        )
     
     def _generate_warning(self, metrics: RAGMetrics, scores: list[float]) -> Optional[str]:
         """Generate warning message for low-quality results.
