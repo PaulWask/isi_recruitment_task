@@ -16,11 +16,25 @@ Or via CLI command:
     uv run kb-index --force
 """
 
+# =============================================================================
+# NLTK DATA SETUP - MUST BE FIRST, BEFORE ANY LLAMAINDEX IMPORTS!
+# LlamaIndex checks NLTK_DATA env var when imported.
+# =============================================================================
+import os
+import sys
+from pathlib import Path
+
+# Configure NLTK before anything else
+_nltk_data_dir = Path(__file__).parent.parent / ".nltk_data"
+_nltk_data_dir.mkdir(exist_ok=True)
+os.environ["NLTK_DATA"] = str(_nltk_data_dir.resolve())
+
+# =============================================================================
+# STANDARD IMPORTS
+# =============================================================================
 import argparse
 import logging
-import sys
 import time
-from pathlib import Path
 
 # Add src to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
@@ -41,19 +55,12 @@ def ensure_nltk_data():
     
     Data is stored in .nltk_data/ in the project root for portability.
     """
-    import os
     import nltk
     
-    # Set NLTK to download to a local cache in project root
-    nltk_data_dir = Path(__file__).parent.parent / ".nltk_data"
-    nltk_data_dir.mkdir(exist_ok=True)
-    
-    # Set environment variable so LlamaIndex finds it
-    os.environ["NLTK_DATA"] = str(nltk_data_dir)
-    
-    # Also add to NLTK's search path
-    if str(nltk_data_dir) not in nltk.data.path:
-        nltk.data.path.insert(0, str(nltk_data_dir))
+    # Ensure NLTK knows about our data directory
+    nltk_data_dir = _nltk_data_dir
+    if str(nltk_data_dir.resolve()) not in nltk.data.path:
+        nltk.data.path.insert(0, str(nltk_data_dir.resolve()))
     
     # Packages required by LlamaIndex for text processing
     required_packages = [
@@ -61,7 +68,7 @@ def ensure_nltk_data():
         ("taggers/averaged_perceptron_tagger_eng", "averaged_perceptron_tagger_eng"),
     ]
     
-    print(f"📁 NLTK data directory: {nltk_data_dir}")
+    print(f"📁 NLTK data directory: {nltk_data_dir.resolve()}")
     
     for data_path, package_name in required_packages:
         try:
@@ -70,16 +77,16 @@ def ensure_nltk_data():
         except LookupError:
             print(f"  📦 {package_name}: downloading...")
             try:
-                nltk.download(package_name, download_dir=str(nltk_data_dir), quiet=True)
+                nltk.download(package_name, download_dir=str(nltk_data_dir.resolve()), quiet=True)
                 print(f"  ✅ {package_name}: downloaded successfully")
             except Exception as e:
                 print(f"  ⚠️ {package_name}: download failed ({e}), will retry at runtime")
 
 
-# Configure logging
+# Configure logging with professional timestamp format (HH:MM:SS.mmm)
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s",
+    format="%(asctime)s.%(msecs)03d | %(levelname)-8s | %(name)s | %(message)s",
     datefmt="%H:%M:%S",
 )
 logger = logging.getLogger(__name__)

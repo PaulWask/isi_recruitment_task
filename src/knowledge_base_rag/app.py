@@ -25,12 +25,23 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import streamlit as st
-
-# Point NLTK to pre-downloaded data (from indexing step) to avoid runtime downloads
+# ============================================================================
+# NLTK Configuration - MUST be set before any LlamaIndex imports
+# LlamaIndex uses its own NLTK cache path, we need to override it
+# ============================================================================
 _nltk_data_dir = Path(__file__).parent.parent.parent / ".nltk_data"
 if _nltk_data_dir.exists():
-    os.environ.setdefault("NLTK_DATA", str(_nltk_data_dir))
+    # Set multiple env vars that NLTK/LlamaIndex might use
+    os.environ["NLTK_DATA"] = str(_nltk_data_dir.absolute())
+    # Also try to configure NLTK directly if it's already imported
+    try:
+        import nltk
+        if str(_nltk_data_dir.absolute()) not in nltk.data.path:
+            nltk.data.path.insert(0, str(_nltk_data_dir.absolute()))
+    except ImportError:
+        pass
+
+import streamlit as st
 
 # Light imports only (no LlamaIndex/NLTK trigger)
 from knowledge_base_rag.core.config import settings
@@ -54,8 +65,12 @@ CHAT_HISTORY_FILE = Path("chat_history.json")
 # This is separate from st.session_state which resets per browser session
 _server_resources_loaded = False
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
+# Configure logging with professional timestamp format (HH:MM:SS.mmm)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s.%(msecs)03d | %(levelname)-8s | %(name)s | %(message)s",
+    datefmt="%H:%M:%S",
+)
 logger = logging.getLogger(__name__)
 
 # Page configuration
@@ -190,143 +205,98 @@ def init_session_state():
 def show_startup_screen():
     """Show a loading screen during first initialization with real progress.
     
-    Uses cached resources for faster subsequent loads.
-    
-    Note: We use a two-phase approach:
-    1. First call: render loading screen only, force rerun
-    2. Second call: do heavy initialization with progress updates
+    Uses Streamlit's native spinner for reliable display.
+    No st.rerun() to avoid WSL latency issues.
     """
-    logger.info("🎬 Rendering loading screen...")
+    logger.info("🎬 Starting initialization...")
     
-    # Phase 1: Show loading screen IMMEDIATELY and force Streamlit to render
-    # This ensures user sees SOMETHING before heavy imports
-    if "loading_phase" not in st.session_state:
-        st.session_state.loading_phase = 1
-        # Render minimal loading screen
-        st.markdown("""
-        <style>
-            @keyframes spin { to { transform: rotate(360deg); } }
-            @keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-8px); } }
-        </style>
-        <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:70vh; text-align:center;">
-            <div style="background:rgba(30, 30, 50, 0.95); border:1px solid rgba(102,126,234,0.3); padding:2rem; border-radius:1rem; box-shadow:0 8px 32px rgba(0,0,0,0.3), 0 0 30px rgba(102,126,234,0.15); max-width:400px; width:90%;">
-                <div style="font-size:4rem; margin-bottom:1rem; animation:float 3s ease-in-out infinite;">📚</div>
-                <h1 style="background:linear-gradient(135deg, #667eea 0%, #764ba2 100%); -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text; font-size:1.8rem; font-weight:700; margin:0 0 0.5rem 0;">Knowledge Base Q&A</h1>
-                <p style="color:#a1a1aa; font-size:1rem; margin:0 0 1.5rem 0;">Loading system components...</p>
-                <div style="width:40px; height:40px; border:3px solid rgba(102,126,234,0.3); border-top-color:#667eea; border-radius:50%; margin:0 auto; animation:spin 1s linear infinite;"></div>
-            </div>
-            <p style="color:#718096; font-size:0.85rem; margin-top:1rem;">First load may take ~30 seconds</p>
-        </div>
-        """, unsafe_allow_html=True)
-        # Force Streamlit to render THIS immediately, then continue on next rerun
-        time.sleep(0.1)  # Small delay to ensure render
-        st.rerun()
+    # Simple, reliable loading UI using Streamlit's native components
+    st.markdown("""
+    <style>
+        @keyframes spin { to { transform: rotate(360deg); } }
+        @keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-8px); } }
+    </style>
+    """, unsafe_allow_html=True)
     
-    # Phase 2: Now do the heavy initialization
-    st.session_state.loading_phase = 2
-    
-    # Loading screen with INLINE styles (works in both light/dark mode)
-    loading_html = st.empty()
-    
-    def render_loading_card(status: str = "Initializing system...", icon: str = "📚", spinning: bool = True):
-        """Render the loading card with current status."""
-        spinner_html = """<div style="width:40px; height:40px; border:3px solid rgba(102,126,234,0.3); border-top-color:#667eea; border-radius:50%; margin:0 auto; animation:spin 1s linear infinite;"></div>""" if spinning else ""
-        loading_html.markdown(f"""
-        <style>
-            @keyframes spin {{ to {{ transform: rotate(360deg); }} }}
-            @keyframes float {{ 0%, 100% {{ transform: translateY(0); }} 50% {{ transform: translateY(-8px); }} }}
-        </style>
-        <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:60vh; text-align:center;">
-            <div style="background:rgba(30, 30, 50, 0.95); border:1px solid rgba(102,126,234,0.3); padding:2rem; border-radius:1rem; box-shadow:0 8px 32px rgba(0,0,0,0.3), 0 0 30px rgba(102,126,234,0.15); max-width:400px; width:90%;">
-                <div style="font-size:4rem; margin-bottom:1rem; animation:float 3s ease-in-out infinite;">{icon}</div>
-                <h1 style="background:linear-gradient(135deg, #667eea 0%, #764ba2 100%); -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text; font-size:1.8rem; font-weight:700; margin:0 0 0.5rem 0;">Knowledge Base Q&A</h1>
-                <p style="color:#a1a1aa; font-size:1rem; margin:0 0 1.5rem 0;">{status}</p>
-                {spinner_html}
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    # Initial loading card
-    render_loading_card("Initializing system...")
-    
-    # Progress containers - centered
+    # Create a centered container for loading
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
+        # Loading card
+        st.markdown("""
+        <div style="background:rgba(30, 30, 50, 0.95); border:1px solid rgba(102,126,234,0.3); padding:2rem; border-radius:1rem; box-shadow:0 8px 32px rgba(0,0,0,0.3); text-align:center; margin-top:20vh;">
+            <div style="font-size:3rem; margin-bottom:1rem; animation:float 3s ease-in-out infinite;">📚</div>
+            <h1 style="background:linear-gradient(135deg, #667eea 0%, #764ba2 100%); -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text; font-size:1.5rem; font-weight:700; margin:0 0 1rem 0;">Knowledge Base Q&A</h1>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # Progress bar and status
         progress_bar = st.progress(0)
         status_text = st.empty()
-        details_text = st.empty()
-    
-    def update_status(step: str, progress: float, detail: str = "", delay: float = 0.1):
-        """Update loading status with visible delay."""
-        progress_bar.progress(progress)
-        status_text.markdown(f"<p style='text-align:center; color:#667eea; font-weight:600;'>🔄 {step}</p>", unsafe_allow_html=True)
-        if detail:
-            details_text.markdown(f"<p style='text-align:center; color:#a1a1aa; font-size:0.85rem;'>{detail}</p>", unsafe_allow_html=True)
-        # Update the loading card with current step
-        render_loading_card(step)
-        time.sleep(delay)  # Small delay so user can see progress
-    
-    try:
-        # Step 1: Configuration
-        update_status("Loading configuration...", 0.1, f"LLM: {settings.llm_service}")
         
-        # Step 2: Load embedding model (first run downloads NLTK data)
-        update_status("Loading models...", 0.25, "First run may download NLTK data (~30s)...")
-        
-        # Step 3: Load embedding model + check vector store (CACHED)
-        update_status("Connecting to vector store...", 0.4, "Checking Qdrant...")
-        vs_stats = get_cached_vector_store_stats()
-        vs_exists = vs_stats.get("exists", False)
-        vectors = vs_stats.get("vectors_count", 0)
-        
-        if vs_exists and vectors > 0:
-            update_status("Vector store connected", 0.55, f"Found {vectors:,} vectors")
-        elif vs_exists:
-            update_status("Vector store empty", 0.55, "⚠️ Run indexing first")
-        else:
-            update_status("No index found", 0.55, "⚠️ Run indexing first")
-        
-        # Step 4: LLM check (CACHED for 30 seconds)
-        update_status("Checking language model...", 0.7, f"Service: {settings.llm_service}")
-        if settings.llm_service == "local":
-            llm_available = check_ollama_status()  # Cached!
-            if llm_available:
-                update_status("LLM connected", 0.8, f"Ollama ({settings.llm_model})")
+        def update_status(step: str, progress: float, detail: str = ""):
+            """Update loading status."""
+            progress_bar.progress(progress)
+            if detail:
+                status_text.markdown(f"<p style='text-align:center; color:#667eea;'><b>{step}</b><br><small style='color:#a1a1aa;'>{detail}</small></p>", unsafe_allow_html=True)
             else:
-                update_status("LLM offline", 0.8, "⚠️ Start Ollama to enable queries")
-        else:
-            has_key = bool(settings.groq_api_key)
-            if has_key:
-                update_status("LLM configured", 0.8, f"Groq ({settings.groq_model})")
+                status_text.markdown(f"<p style='text-align:center; color:#667eea;'><b>{step}</b></p>", unsafe_allow_html=True)
+        
+        try:
+            # Step 1: Configuration
+            update_status("Loading configuration...", 0.1, f"LLM: {settings.llm_service}")
+            
+            # Step 2: Load embedding model + check vector store (CACHED)
+            update_status("Connecting to vector store...", 0.3, "Checking Qdrant...")
+            vs_stats = get_cached_vector_store_stats()
+            vs_exists = vs_stats.get("exists", False)
+            vectors = vs_stats.get("vectors_count", 0)
+            
+            if vs_exists and vectors > 0:
+                update_status("Vector store connected", 0.5, f"Found {vectors:,} vectors")
+            elif vs_exists:
+                update_status("Vector store empty", 0.5, "⚠️ Run indexing first")
             else:
-                update_status("LLM not configured", 0.8, "⚠️ Set GROQ_API_KEY")
-        
-        # Step 5: Initialize RAG engine (CACHED)
-        update_status("Initializing RAG engine...", 0.9, "Building query pipeline...")
-        st.session_state.rag_engine = get_cached_rag_engine()
-        
-        # Engine is ready if we have vectors
-        st.session_state.engine_ready = vs_exists and vectors > 0
-        
-        # Final status - complete the progress bar
-        progress_bar.progress(1.0)
-        update_status("Ready!", 1.0, "Loading main interface...")
-        # Don't show "Ready!" screen - go straight to app (avoids flash)
-        
-    except Exception as e:
-        logger.error(f"Startup error: {e}")
-        logger.exception(e)
-        status_text.error(f"Initialization error: {e}")
-        # Still mark as initialized so user can see the "not ready" warning with instructions
-        st.session_state.engine_ready = False
-        time.sleep(2)
+                update_status("No index found", 0.5, "⚠️ Run indexing first")
+            
+            # Step 3: LLM check (CACHED for 30 seconds)
+            update_status("Checking language model...", 0.7, f"Service: {settings.llm_service}")
+            if settings.llm_service == "local":
+                llm_available = check_ollama_status()  # Cached!
+                if llm_available:
+                    update_status("LLM connected", 0.8, f"Ollama ({settings.llm_model})")
+                else:
+                    update_status("LLM offline", 0.8, "⚠️ Start Ollama to enable queries")
+            else:
+                has_key = bool(settings.groq_api_key)
+                if has_key:
+                    update_status("LLM configured", 0.8, f"Groq ({settings.groq_model})")
+                else:
+                    update_status("LLM not configured", 0.8, "⚠️ Set GROQ_API_KEY")
+            
+            # Step 4: Initialize RAG engine (CACHED)
+            update_status("Initializing RAG engine...", 0.9, "Building query pipeline...")
+            st.session_state.rag_engine = get_cached_rag_engine()
+            
+            # Engine is ready if we have vectors
+            st.session_state.engine_ready = vs_exists and vectors > 0
+            
+            # Complete
+            progress_bar.progress(1.0)
+            update_status("Ready!", 1.0, "")
+            
+        except Exception as e:
+            logger.error(f"Startup error: {e}")
+            logger.exception(e)
+            status_text.error(f"Initialization error: {e}")
+            st.session_state.engine_ready = False
     
-    # Mark as initialized and clean up loading state
+    # Mark as initialized
     st.session_state.initialized = True
-    st.session_state._resources_loaded = True
-    if "loading_phase" in st.session_state:
-        del st.session_state.loading_phase
-    st.rerun()
+    
+    # Set server-level cache flag (persists across all sessions/refreshes)
+    global _server_resources_loaded
+    _server_resources_loaded = True
+    logger.info("✅ Initialization complete")
 
 
 def get_rag_engine():
@@ -758,12 +728,11 @@ def main():
             st.session_state.engine_ready = vs_stats.get("exists", False) and vs_stats.get("vectors_count", 0) > 0
             st.session_state.initialized = True
         else:
-            # First load - show startup screen
-            logger.info("📦 First load - showing startup screen...")
+            # First load - show startup screen then continue
+            logger.info("📦 First load - initializing...")
             show_startup_screen()
-            # Set server-level marker for future refreshes
-            _server_resources_loaded = True
-            return
+            # Note: _server_resources_loaded is set inside show_startup_screen()
+            # After initialization, continue to render UI (no return)
     
     # Sidebar
     top_k, show_sources, use_reranking, use_query_expansion, use_hybrid_search = render_sidebar()
