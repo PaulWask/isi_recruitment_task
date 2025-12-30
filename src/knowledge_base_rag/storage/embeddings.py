@@ -25,7 +25,14 @@ Performance expectations:
 """
 
 import logging
+import os
+from pathlib import Path
 from typing import Optional
+
+# Configure NLTK before any LlamaIndex imports (LlamaIndex triggers NLTK downloads)
+_nltk_data_dir = Path(__file__).parent.parent.parent.parent / ".nltk_data"
+if _nltk_data_dir.exists():
+    os.environ.setdefault("NLTK_DATA", str(_nltk_data_dir))
 
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 
