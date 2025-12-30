@@ -33,15 +33,19 @@ from typing import Optional
 # NLTK Configuration - MUST be set BEFORE any LlamaIndex imports!
 # LlamaIndex checks NLTK_DATA env var to determine download location.
 # =============================================================================
-_nltk_data_dir = Path(__file__).parent.parent.parent.parent / ".nltk_data"
+# Check multiple possible NLTK data locations (Docker vs local)
+_nltk_paths = [
+    Path("/app/.cache/nltk_data"),  # Docker location (pre-downloaded during build)
+    Path(__file__).parent.parent.parent.parent / ".nltk_data",  # Local dev location
+]
 
-# Always set NLTK_DATA to our local cache
-os.environ["NLTK_DATA"] = str(_nltk_data_dir.resolve())
-
-# Pre-configure NLTK before LlamaIndex imports it
 import nltk
-if str(_nltk_data_dir.resolve()) not in nltk.data.path:
-    nltk.data.path.insert(0, str(_nltk_data_dir.resolve()))
+for _nltk_data_dir in _nltk_paths:
+    if _nltk_data_dir.exists():
+        os.environ["NLTK_DATA"] = str(_nltk_data_dir.resolve())
+        if str(_nltk_data_dir.resolve()) not in nltk.data.path:
+            nltk.data.path.insert(0, str(_nltk_data_dir.resolve()))
+        break  # Use first valid path
 
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 

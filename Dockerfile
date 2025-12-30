@@ -78,12 +78,21 @@ RUN mkdir -p /app/domaindata /app/qdrant_db /app/.cache \
 # Switch to non-root user
 USER appuser
 
-# Pre-download embedding model (avoids 80MB download on first request)
+# Pre-download all models and data during build (not at runtime!)
 ENV HF_HOME=/app/.cache/huggingface
 ENV TRANSFORMERS_CACHE=/app/.cache/huggingface
+ENV NLTK_DATA=/app/.cache/nltk_data
+
+# 1. Download embedding model (~80MB)
 RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2')"
 
-# Compile Python bytecode for faster startup
+# 2. Download cross-encoder reranker model (~80MB) 
+RUN python -c "from sentence_transformers import CrossEncoder; CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')"
+
+# 3. Download NLTK data required by LlamaIndex
+RUN python -c "import nltk; nltk.download('punkt_tab', download_dir='/app/.cache/nltk_data', quiet=True); nltk.download('averaged_perceptron_tagger_eng', download_dir='/app/.cache/nltk_data', quiet=True); nltk.download('stopwords', download_dir='/app/.cache/nltk_data', quiet=True)"
+
+# 4. Compile Python bytecode for faster startup
 RUN python -m compileall -q /app/src
 
 # Environment variables

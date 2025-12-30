@@ -29,17 +29,21 @@ from typing import TYPE_CHECKING
 # NLTK Configuration - MUST be set before any LlamaIndex imports
 # LlamaIndex uses its own NLTK cache path, we need to override it
 # ============================================================================
-_nltk_data_dir = Path(__file__).parent.parent.parent / ".nltk_data"
-if _nltk_data_dir.exists():
-    # Set multiple env vars that NLTK/LlamaIndex might use
-    os.environ["NLTK_DATA"] = str(_nltk_data_dir.absolute())
-    # Also try to configure NLTK directly if it's already imported
-    try:
-        import nltk
-        if str(_nltk_data_dir.absolute()) not in nltk.data.path:
-            nltk.data.path.insert(0, str(_nltk_data_dir.absolute()))
-    except ImportError:
-        pass
+# Check multiple possible NLTK data locations (Docker vs local)
+_nltk_paths = [
+    Path("/app/.cache/nltk_data"),  # Docker location (pre-downloaded)
+    Path(__file__).parent.parent.parent / ".nltk_data",  # Local dev location
+]
+for _nltk_data_dir in _nltk_paths:
+    if _nltk_data_dir.exists():
+        os.environ["NLTK_DATA"] = str(_nltk_data_dir.absolute())
+        try:
+            import nltk
+            if str(_nltk_data_dir.absolute()) not in nltk.data.path:
+                nltk.data.path.insert(0, str(_nltk_data_dir.absolute()))
+        except ImportError:
+            pass
+        break  # Use first valid path
 
 import streamlit as st
 
@@ -172,8 +176,16 @@ def _load_chat_history_from_file() -> list:
     """Load chat history from file (cached)."""
     try:
         if CHAT_HISTORY_FILE.exists():
-            data = json.loads(CHAT_HISTORY_FILE.read_text())
-            return data.get("messages", [])
+            content = CHAT_HISTORY_FILE.read_text().strip()
+            if not content:
+                return []
+            data = json.loads(content)
+            # Handle both formats: {"messages": [...]} or [...]
+            if isinstance(data, list):
+                return data
+            elif isinstance(data, dict):
+                return data.get("messages", [])
+            return []
     except Exception as e:
         logger.error(f"Failed to load chat history: {e}")
     return []
