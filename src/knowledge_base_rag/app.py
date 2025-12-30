@@ -218,6 +218,24 @@ def init_session_state():
     if "initialized" not in st.session_state:
         # First load - always show startup screen
         st.session_state.initialized = False
+    
+    if "is_processing" not in st.session_state:
+        # Flag to prevent sidebar changes from interrupting queries
+        st.session_state.is_processing = False
+    
+    if "query_to_process" not in st.session_state:
+        # Query waiting to be processed (after rerun for frozen UI)
+        st.session_state.query_to_process = None
+    
+    # Initialize advanced retrieval settings
+    if "setting_query_expansion" not in st.session_state:
+        st.session_state.setting_query_expansion = False
+    if "setting_hybrid_search" not in st.session_state:
+        st.session_state.setting_hybrid_search = False
+    if "setting_show_sources" not in st.session_state:
+        st.session_state.setting_show_sources = True
+    if "setting_top_k" not in st.session_state:
+        st.session_state.setting_top_k = 6
 
 
 def do_initialization():
@@ -237,6 +255,7 @@ def do_initialization():
         vs_exists = vs_stats.get("exists", False)
         vectors = vs_stats.get("vectors_count", 0)
         st.session_state.engine_ready = vs_exists and vectors > 0
+        st.session_state._vs_count = vectors  # Store for frozen sidebar display
         
         logger.info(f"✅ Initialization complete: {vectors} vectors, ready={st.session_state.engine_ready}")
         
@@ -325,12 +344,24 @@ def render_sidebar():
             help="Number of document chunks to retrieve for each query"
         )
         
-        show_sources = st.checkbox("Show sources", value=True)
+        show_sources = st.checkbox("Show sources", value=st.session_state.setting_show_sources)
+        st.session_state.setting_show_sources = show_sources
         
         # Advanced settings - Reranking is ALWAYS ON (best practice)
         use_reranking = True  # Always enabled - proven to give best results
         
-        with st.expander("🔧 Advanced Retrieval"):
+        # Initialize session state for settings (prevents rerun interruption)
+        if "setting_query_expansion" not in st.session_state:
+            st.session_state.setting_query_expansion = False
+        if "setting_hybrid_search" not in st.session_state:
+            st.session_state.setting_hybrid_search = False
+        
+        # Check if a query is being processed
+        is_processing = st.session_state.get("is_processing", False)
+        
+        # Make Advanced Retrieval header more visible
+        st.markdown("### 🔧 Advanced Retrieval")
+        with st.expander("Show Options", expanded=False):
             # Show reranking status (not toggleable)
             st.success("✅ **Reranking: Always Enabled** — Cross-encoder for best accuracy")
             st.caption("Adds ~3-5s latency but improves precision by ~25%")
@@ -339,28 +370,52 @@ def render_sidebar():
             st.markdown("##### 🧪 Optional Enhancements")
             st.caption("⚠️ These may increase latency significantly. Use only when needed.")
             
-            use_query_expansion = st.checkbox(
-                "Query Expansion",
-                value=False,
-                help="Expands acronyms. Adds ~20-30s latency (runs 3 queries)."
-            )
-            if use_query_expansion:
-                st.warning("⚠️ Adds ~20-30s latency (3x queries)")
-                st.caption("Expanding: CPI→Consumer Price Index, GDP, YoY, etc.")
+            # CRITICAL: During processing, show STATIC display instead of interactive widgets
+            # This prevents any click from triggering a rerun that would interrupt the query
+            if is_processing:
+                st.warning("⏳ Query in progress... please wait")
+                # Show current settings as static text (no interactive widgets!)
+                if st.session_state.setting_query_expansion:
+                    st.markdown("☑️ Query Expansion: **Enabled**")
+                else:
+                    st.markdown("☐ Query Expansion: Disabled")
+                if st.session_state.setting_hybrid_search:
+                    st.markdown("☑️ Hybrid Search: **Enabled**")
+                else:
+                    st.markdown("☐ Hybrid Search: Disabled")
+                # Use stored values
+                use_query_expansion = st.session_state.setting_query_expansion
+                use_hybrid_search = st.session_state.setting_hybrid_search
             else:
-                st.caption("💡 Only use for: Short queries with acronyms (CPI, GDP, YoY)")
+                # NOT processing - show interactive checkboxes
+                use_query_expansion = st.checkbox(
+                    "Query Expansion",
+                    value=st.session_state.setting_query_expansion,
+                    key="checkbox_query_expansion",
+                    help="Expands acronyms. Adds ~20-30s latency (runs 3 queries)."
+                )
+                st.session_state.setting_query_expansion = use_query_expansion
+                
+                if use_query_expansion:
+                    st.warning("⚠️ Adds ~20-30s latency (3x queries)")
+                    st.caption("Expanding: CPI→Consumer Price Index, GDP, YoY, etc.")
+                else:
+                    st.caption("💡 Only use for: Short queries with acronyms (CPI, GDP, YoY)")
+                
+                use_hybrid_search = st.checkbox(
+                    "Hybrid Search (BM25)",
+                    value=st.session_state.setting_hybrid_search,
+                    key="checkbox_hybrid_search",
+                    help="Adds keyword matching. Useful for exact terms/IDs."
+                )
+                st.session_state.setting_hybrid_search = use_hybrid_search
+                
+                if use_hybrid_search:
+                    st.info("🔀 BM25 + Vector fusion (60/40)")
+                else:
+                    st.caption("💡 Only use for: Document IDs, specific numbers, exact terms")
             
-            use_hybrid_search = st.checkbox(
-                "Hybrid Search (BM25)",
-                value=False,
-                help="Adds keyword matching. Useful for exact terms/IDs."
-            )
-            if use_hybrid_search:
-                st.info("🔀 BM25 + Vector fusion (60/40)")
-            else:
-                st.caption("💡 Only use for: Document IDs, specific numbers, exact terms")
-            
-            # Quick guide
+            # Quick guide (always show)
             st.divider()
             with st.popover("📖 When to use these?"):
                 st.markdown("""
@@ -387,6 +442,8 @@ def render_sidebar():
         
         if st.button("🗑️ Clear History", use_container_width=True):
             st.session_state.messages = []
+            st.session_state.is_processing = False
+            st.session_state.total_queries = 0
             # Clear the saved history file (truncate instead of delete for Docker volumes)
             try:
                 CHAT_HISTORY_FILE.write_text("[]")
@@ -666,6 +723,91 @@ def main():
     # Initialize session state first
     init_session_state()
     
+    # =========================================================================
+    # CRITICAL: If processing a query, show FROZEN UI and do the processing
+    # This happens AFTER st.rerun() was called, ensuring no interactive widgets
+    # =========================================================================
+    if st.session_state.get("is_processing", False) and st.session_state.get("query_to_process"):
+        # Show frozen sidebar (NO interactive widgets) - mirrors normal sidebar structure
+        with st.sidebar:
+            # System Status (same as normal)
+            st.markdown("## ⚙️ System Status")
+            col1, col2 = st.columns(2)
+            with col1:
+                st.markdown("🟢 **Vector Store**")
+                st.caption(f"{st.session_state.get('_vs_count', 0):,} vectors")
+            with col2:
+                st.markdown("🟢 **LLM (Ollama)**")
+                st.caption("llama3.2:3b")
+            
+            st.divider()
+            
+            # Settings header (same as normal)
+            st.markdown("## 🎯 Settings")
+            st.markdown(f"**Sources to retrieve:** {st.session_state.get('setting_top_k', 6)}")
+            st.markdown(f"**Show sources:** {'Yes' if st.session_state.get('setting_show_sources', True) else 'No'}")
+            
+            st.divider()
+            
+            # Advanced Retrieval - locked during processing
+            st.markdown("### 🔧 Advanced Retrieval")
+            st.info("🔍 **Processing query...**")
+            st.warning("⏳ Settings locked - please wait")
+            st.markdown(f"• Query Expansion: **{'On' if st.session_state.get('setting_query_expansion') else 'Off'}**")
+            st.markdown(f"• Hybrid Search: **{'On' if st.session_state.get('setting_hybrid_search') else 'Off'}**")
+        
+        # Show header
+        st.markdown("## 📚 Knowledge Base Q&A")
+        
+        # Show chat history
+        show_sources = st.session_state.get("setting_show_sources", True)
+        render_chat_history(show_sources)
+        
+        # Get the query to process
+        query = st.session_state.query_to_process
+        st.session_state.query_to_process = None  # Clear immediately to prevent re-processing
+        
+        # Get engine and process
+        engine = get_rag_engine()
+        if engine:
+            current_top_k = st.session_state.get("setting_top_k", 6)
+            current_query_expansion = st.session_state.get("setting_query_expansion", False)
+            current_hybrid_search = st.session_state.get("setting_hybrid_search", False)
+            
+            with st.spinner("🔍 Searching knowledge base..."):
+                try:
+                    response = engine.query(
+                        query,
+                        similarity_top_k=current_top_k,
+                        use_query_expansion=current_query_expansion,
+                        use_hybrid_search=current_hybrid_search,
+                    )
+                    
+                    # Store response in messages
+                    st.session_state.messages.append({
+                        "role": "assistant",
+                        "content": response.answer,
+                        "sources": response.sources,
+                        "latency_ms": response.metrics.e2e_ms if response.metrics else 0,
+                        "metrics": response.metrics.to_dict() if response.metrics else {},
+                        "warning": response.warning,
+                    })
+                    st.session_state.total_queries += 1
+                    save_chat_history()
+                        
+                except Exception as e:
+                    logger.exception("Query failed")
+                    st.session_state.messages.append({
+                        "role": "assistant",
+                        "content": f"❌ Error: {str(e)}",
+                        "sources": [],
+                    })
+                finally:
+                    st.session_state.is_processing = False
+        
+        # CRITICAL: Rerun to exit frozen UI and show normal interface with answer
+        st.rerun()
+    
     # Show loading indicator if not initialized yet
     loading_placeholder = st.empty()
     
@@ -712,64 +854,34 @@ def main():
     # Chat history
     render_chat_history(show_sources)
     
-    # Chat input
-    if prompt := st.chat_input("Ask a question about your documents..."):
-        # Add user message
+    # ==========================================================================
+    # QUERY PROCESSING
+    # ==========================================================================
+    # Simple flow: Only process new queries from chat_input.
+    # During processing, input is disabled to prevent duplicate submissions.
+    # ==========================================================================
+    
+    # Chat input - only capture new query if not already processing
+    new_prompt = None
+    if not st.session_state.get("is_processing", False):
+        new_prompt = st.chat_input("Ask a question about your documents...")
+    else:
+        # Show disabled input with message
+        st.chat_input("⏳ Processing...", disabled=True)
+    
+    # Handle new query submission
+    if new_prompt:
+        # Store query and settings, then RERUN to show frozen UI
+        st.session_state.query_to_process = new_prompt
+        st.session_state.is_processing = True
+        st.session_state.setting_top_k = top_k
+        # Add user message NOW so it shows in the frozen UI
         st.session_state.messages.append({
             "role": "user",
-            "content": prompt,
+            "content": new_prompt,
         })
-        
-        # Display user message
-        render_message("user", prompt)
-        
-        # Generate response
-        with st.spinner("Searching knowledge base..."):
-            try:
-                response = engine.query(prompt, similarity_top_k=top_k)
-                metrics = response.metrics
-                
-                # Prepare metrics for storage
-                metrics_dict = metrics.to_dict() if metrics else {}
-                
-                # Add assistant message with metrics
-                st.session_state.messages.append({
-                    "role": "assistant",
-                    "content": response.answer,
-                    "sources": response.sources,
-                    "latency_ms": metrics.e2e_ms if metrics else 0,
-                    "metrics": metrics_dict,
-                    "warning": response.warning,
-                })
-                
-                st.session_state.total_queries += 1
-                
-                # Display response
-                render_message("assistant", response.answer, response.sources, show_sources)
-                
-                # Show warning if present (low relevance, etc.)
-                if response.warning:
-                    st.warning(response.warning)
-                
-                # Show detailed metrics
-                if metrics:
-                    render_metrics_summary(metrics)
-                
-            except Exception as e:
-                error_msg = f"Error: {str(e)}"
-                st.error(error_msg)
-                logger.exception("Query failed")
-                
-                st.session_state.messages.append({
-                    "role": "assistant",
-                    "content": f"❌ {error_msg}",
-                    "sources": [],
-                })
-        
-        # Save chat history to file (persists across refreshes)
-        save_chat_history()
-        
-        # Note: No st.rerun() needed - sidebar updates automatically on next interaction
+        # RERUN immediately - this will hit the frozen UI block at the top
+        st.rerun()
 
 
 # Streamlit runs the entire script on each interaction

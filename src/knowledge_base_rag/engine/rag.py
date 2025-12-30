@@ -31,6 +31,7 @@ Metrics tracked:
 """
 
 import logging
+import re
 import time
 from dataclasses import dataclass, field
 from typing import Optional
@@ -369,18 +370,14 @@ class RAGEngine:
         if self._bm25_index is None and self.enable_hybrid_search:
             try:
                 from knowledge_base_rag.engine.retrieval import BM25Index
-                # Get all documents from the index
-                docstore = self.index.docstore
-                documents = []
-                doc_ids = []
-                for doc_id, node in docstore.docs.items():
-                    # Get text content from node (handle both TextNode and BaseNode)
-                    text = getattr(node, 'text', None) or getattr(node, 'get_content', lambda: '')()
-                    if text:
-                        documents.append(text)
-                        doc_ids.append(doc_id)
                 
-                if documents:
+                # Fetch documents directly from Qdrant (docstore is empty with Qdrant)
+                doc_data = self.vector_store_manager.get_all_documents()
+                
+                if doc_data:
+                    doc_ids = [doc_id for doc_id, _ in doc_data]
+                    documents = [text for _, text in doc_data]
+                    
                     self._bm25_index = BM25Index(documents)
                     self._bm25_doc_ids = doc_ids  # Map index position to node_id
                     
@@ -389,9 +386,9 @@ class RAGEngine:
                     _bm25_cache["doc_ids"] = self._bm25_doc_ids
                     _bm25_cache["doc_count"] = len(documents)
                     
-                    logger.info(f"BM25 index built with {len(documents)} documents")
+                    logger.info(f"BM25 index built with {len(documents)} documents from Qdrant")
                 else:
-                    logger.warning("No documents found for BM25 index")
+                    logger.warning("No documents found in Qdrant for BM25 index")
                     self.enable_hybrid_search = False
             except ImportError:
                 logger.warning("rank-bm25 not installed. Run: uv add rank-bm25")
@@ -653,6 +650,13 @@ class RAGEngine:
         generation_time = (time.perf_counter() - generation_start) * 1000
         logger.info(f"Answer generated in {generation_time:.0f}ms")
         
+        # Post-process response: Add proper spacing before source citations
+        answer_text = str(response)
+        # Add two line breaks before "Source:" citations for readability
+        answer_text = re.sub(r'\n?(Source:)', r'\n\n\1', answer_text)
+        # Also handle inline source citations without newline
+        answer_text = re.sub(r'([.!?])\s*(Source:)', r'\1\n\n\2', answer_text)
+        
         # End-to-end time
         e2e_time = (time.perf_counter() - start_time) * 1000  # ms
         
@@ -675,7 +679,7 @@ class RAGEngine:
         
         # Build response
         rag_response = RAGResponse(
-            answer=str(response),
+            answer=answer_text,
             sources=sources,
             query=question,
             confidence=confidence,
@@ -719,6 +723,8 @@ CRITICAL RULES:
 8. When multiple sources exist, synthesize them coherently
 9. For numerical data, maintain precision (don't round unless the source does)
 10. Identify the source institution when mentioned (e.g., "According to the Central Bank...")
+11. For TABLE DATA: Match the EXACT row label from the question to find the correct value. Don't confuse subtotals with specific line items.
+12. PAY CLOSE ATTENTION to footnotes (marked with *) that may specify conditions
 
 RESPONSE FORMAT:
 - Lead with the direct answer to the question
