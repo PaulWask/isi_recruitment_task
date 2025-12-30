@@ -239,9 +239,10 @@ def is_ollama_available() -> bool:
     try:
         import httpx
 
+        # Short timeout - if Ollama doesn't respond in 1.5s on localhost, it's slow/down
         response = httpx.get(
             f"{settings.ollama_base_url}/api/tags",
-            timeout=5.0,
+            timeout=1.5,
         )
         if response.status_code == 200:
             models = response.json().get("models", [])

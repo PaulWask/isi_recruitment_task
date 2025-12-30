@@ -29,10 +29,23 @@ import os
 from pathlib import Path
 from typing import Optional
 
-# Configure NLTK before any LlamaIndex imports (LlamaIndex triggers NLTK downloads)
-_nltk_data_dir = Path(__file__).parent.parent.parent.parent / ".nltk_data"
-if _nltk_data_dir.exists():
-    os.environ.setdefault("NLTK_DATA", str(_nltk_data_dir))
+# =============================================================================
+# NLTK Configuration - MUST be set BEFORE any LlamaIndex imports!
+# LlamaIndex checks NLTK_DATA env var to determine download location.
+# =============================================================================
+# Check multiple possible NLTK data locations (Docker vs local)
+_nltk_paths = [
+    Path("/app/.cache/nltk_data"),  # Docker location (pre-downloaded during build)
+    Path(__file__).parent.parent.parent.parent / ".nltk_data",  # Local dev location
+]
+
+import nltk
+for _nltk_data_dir in _nltk_paths:
+    if _nltk_data_dir.exists():
+        os.environ["NLTK_DATA"] = str(_nltk_data_dir.resolve())
+        if str(_nltk_data_dir.resolve()) not in nltk.data.path:
+            nltk.data.path.insert(0, str(_nltk_data_dir.resolve()))
+        break  # Use first valid path
 
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 
