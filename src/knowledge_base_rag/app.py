@@ -44,6 +44,10 @@ if TYPE_CHECKING:
 # Chat history persistence file
 CHAT_HISTORY_FILE = Path("chat_history.json")
 
+# Server-level cache flag (persists across browser refreshes)
+# This is separate from st.session_state which resets per browser session
+_server_resources_loaded = False
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -100,11 +104,12 @@ def get_cached_vector_store_stats() -> dict:
         return {"exists": False, "vectors_count": 0, "_cached": True}
 
 
-@st.cache_data(ttl=30, show_spinner=False)  # Cache for 30 seconds
+@st.cache_data(ttl=60, show_spinner=False)  # Cache for 60 seconds
 def check_ollama_status() -> bool:
-    """Check Ollama status - cached for 30 seconds to avoid spam."""
+    """Check Ollama status - cached to avoid spamming HTTP requests."""
     # Lazy import
     from knowledge_base_rag.core.llm import is_ollama_available
+    logger.debug("Checking Ollama status...")
     return is_ollama_available()
 
 
@@ -121,20 +126,23 @@ def check_system_ready() -> tuple[bool, dict]:
 # =============================================================================
 
 def save_chat_history():
-    """Save chat history to file."""
+    """Save chat history to file and invalidate cache."""
     try:
         history = {
             "messages": st.session_state.messages,
             "saved_at": datetime.now().isoformat(),
         }
         CHAT_HISTORY_FILE.write_text(json.dumps(history, indent=2, default=str))
+        # Invalidate cache so next load gets fresh data
+        _load_chat_history_from_file.clear()
         logger.info(f"Chat history saved: {len(st.session_state.messages)} messages")
     except Exception as e:
         logger.error(f"Failed to save chat history: {e}")
 
 
-def load_chat_history():
-    """Load chat history from file."""
+@st.cache_data(ttl=5, show_spinner=False)  # Cache for 5 seconds to avoid disk reads on rapid refreshes
+def _load_chat_history_from_file() -> list:
+    """Load chat history from file (cached)."""
     try:
         if CHAT_HISTORY_FILE.exists():
             data = json.loads(CHAT_HISTORY_FILE.read_text())
@@ -142,6 +150,11 @@ def load_chat_history():
     except Exception as e:
         logger.error(f"Failed to load chat history: {e}")
     return []
+
+
+def load_chat_history():
+    """Load chat history - uses cached version when possible."""
+    return _load_chat_history_from_file()
 
 
 # =============================================================================
@@ -172,26 +185,63 @@ def show_startup_screen():
     """Show a loading screen during first initialization with real progress.
     
     Uses cached resources for faster subsequent loads.
+    
+    Note: We use a two-phase approach:
+    1. First call: render loading screen only, force rerun
+    2. Second call: do heavy initialization with progress updates
     """
     logger.info("🎬 Rendering loading screen...")
     
-    # Loading screen with INLINE styles (works in both light/dark mode)
-    # This renders IMMEDIATELY before any heavy imports
-    loading_html = st.empty()
-    loading_html.markdown("""
-    <style>
-        @keyframes spin { to { transform: rotate(360deg); } }
-        @keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-8px); } }
-    </style>
-    <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:60vh; text-align:center;">
-        <div style="background:rgba(30, 30, 50, 0.95); border:1px solid rgba(102,126,234,0.3); padding:2rem; border-radius:1rem; box-shadow:0 8px 32px rgba(0,0,0,0.3), 0 0 30px rgba(102,126,234,0.15); max-width:400px; width:90%;">
-            <div style="font-size:4rem; margin-bottom:1rem; animation:float 3s ease-in-out infinite;">📚</div>
-            <h1 style="background:linear-gradient(135deg, #667eea 0%, #764ba2 100%); -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text; font-size:1.8rem; font-weight:700; margin:0 0 0.5rem 0;">Knowledge Base Q&A</h1>
-            <p style="color:#a1a1aa; font-size:1rem; margin:0 0 1.5rem 0;">Initializing system...</p>
-            <div style="width:40px; height:40px; border:3px solid rgba(102,126,234,0.3); border-top-color:#667eea; border-radius:50%; margin:0 auto; animation:spin 1s linear infinite;"></div>
+    # Phase 1: Show loading screen IMMEDIATELY and force Streamlit to render
+    # This ensures user sees SOMETHING before heavy imports
+    if "loading_phase" not in st.session_state:
+        st.session_state.loading_phase = 1
+        # Render minimal loading screen
+        st.markdown("""
+        <style>
+            @keyframes spin { to { transform: rotate(360deg); } }
+            @keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-8px); } }
+        </style>
+        <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:70vh; text-align:center;">
+            <div style="background:rgba(30, 30, 50, 0.95); border:1px solid rgba(102,126,234,0.3); padding:2rem; border-radius:1rem; box-shadow:0 8px 32px rgba(0,0,0,0.3), 0 0 30px rgba(102,126,234,0.15); max-width:400px; width:90%;">
+                <div style="font-size:4rem; margin-bottom:1rem; animation:float 3s ease-in-out infinite;">📚</div>
+                <h1 style="background:linear-gradient(135deg, #667eea 0%, #764ba2 100%); -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text; font-size:1.8rem; font-weight:700; margin:0 0 0.5rem 0;">Knowledge Base Q&A</h1>
+                <p style="color:#a1a1aa; font-size:1rem; margin:0 0 1.5rem 0;">Loading system components...</p>
+                <div style="width:40px; height:40px; border:3px solid rgba(102,126,234,0.3); border-top-color:#667eea; border-radius:50%; margin:0 auto; animation:spin 1s linear infinite;"></div>
+            </div>
+            <p style="color:#718096; font-size:0.85rem; margin-top:1rem;">First load may take ~30 seconds</p>
         </div>
-    </div>
-    """, unsafe_allow_html=True)
+        """, unsafe_allow_html=True)
+        # Force Streamlit to render THIS immediately, then continue on next rerun
+        time.sleep(0.1)  # Small delay to ensure render
+        st.rerun()
+    
+    # Phase 2: Now do the heavy initialization
+    st.session_state.loading_phase = 2
+    
+    # Loading screen with INLINE styles (works in both light/dark mode)
+    loading_html = st.empty()
+    
+    def render_loading_card(status: str = "Initializing system...", icon: str = "📚", spinning: bool = True):
+        """Render the loading card with current status."""
+        spinner_html = """<div style="width:40px; height:40px; border:3px solid rgba(102,126,234,0.3); border-top-color:#667eea; border-radius:50%; margin:0 auto; animation:spin 1s linear infinite;"></div>""" if spinning else ""
+        loading_html.markdown(f"""
+        <style>
+            @keyframes spin {{ to {{ transform: rotate(360deg); }} }}
+            @keyframes float {{ 0%, 100% {{ transform: translateY(0); }} 50% {{ transform: translateY(-8px); }} }}
+        </style>
+        <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:60vh; text-align:center;">
+            <div style="background:rgba(30, 30, 50, 0.95); border:1px solid rgba(102,126,234,0.3); padding:2rem; border-radius:1rem; box-shadow:0 8px 32px rgba(0,0,0,0.3), 0 0 30px rgba(102,126,234,0.15); max-width:400px; width:90%;">
+                <div style="font-size:4rem; margin-bottom:1rem; animation:float 3s ease-in-out infinite;">{icon}</div>
+                <h1 style="background:linear-gradient(135deg, #667eea 0%, #764ba2 100%); -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text; font-size:1.8rem; font-weight:700; margin:0 0 0.5rem 0;">Knowledge Base Q&A</h1>
+                <p style="color:#a1a1aa; font-size:1rem; margin:0 0 1.5rem 0;">{status}</p>
+                {spinner_html}
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    # Initial loading card
+    render_loading_card("Initializing system...")
     
     # Progress containers - centered
     col1, col2, col3 = st.columns([1, 2, 1])
@@ -200,20 +250,22 @@ def show_startup_screen():
         status_text = st.empty()
         details_text = st.empty()
     
-    def update_status(step: str, progress: float, detail: str = "", delay: float = 0.15):
+    def update_status(step: str, progress: float, detail: str = "", delay: float = 0.1):
         """Update loading status with visible delay."""
         progress_bar.progress(progress)
         status_text.markdown(f"<p style='text-align:center; color:#667eea; font-weight:600;'>🔄 {step}</p>", unsafe_allow_html=True)
         if detail:
             details_text.markdown(f"<p style='text-align:center; color:#a1a1aa; font-size:0.85rem;'>{detail}</p>", unsafe_allow_html=True)
+        # Update the loading card with current step
+        render_loading_card(step)
         time.sleep(delay)  # Small delay so user can see progress
     
     try:
         # Step 1: Configuration
         update_status("Loading configuration...", 0.1, f"LLM: {settings.llm_service}")
         
-        # Step 2: Animate progress while loading (gives visual feedback)
-        update_status("Initializing embedding model...", 0.25, "Loading all-MiniLM-L6-v2...")
+        # Step 2: Load embedding model (first run downloads NLTK data)
+        update_status("Loading models...", 0.25, "First run may download NLTK data (~30s)...")
         
         # Step 3: Load embedding model + check vector store (CACHED)
         update_status("Connecting to vector store...", 0.4, "Checking Qdrant...")
@@ -250,16 +302,37 @@ def show_startup_screen():
         # Engine is ready if we have vectors
         st.session_state.engine_ready = vs_exists and vectors > 0
         
-        # Final status
+        # Final status - CLEAR the loading card and show final state
         progress_bar.progress(1.0)
-        if st.session_state.engine_ready:
-            status_text.markdown("<p style='text-align:center; color:#48bb78; font-weight:600;'>✅ Ready!</p>", unsafe_allow_html=True)
-            details_text.markdown("<p style='text-align:center; color:#a1a1aa; font-size:0.85rem;'>All systems initialized</p>", unsafe_allow_html=True)
-        else:
-            status_text.markdown("<p style='text-align:center; color:#ecc94b; font-weight:600;'>⚠️ Setup Required</p>", unsafe_allow_html=True)
-            details_text.markdown("<p style='text-align:center; color:#a1a1aa; font-size:0.85rem;'>Run indexing to get started</p>", unsafe_allow_html=True)
         
-        time.sleep(0.3)  # Brief pause to show final status
+        if st.session_state.engine_ready:
+            # Replace loading card with success state
+            loading_html.markdown("""
+            <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:60vh; text-align:center;">
+                <div style="background:rgba(30, 50, 30, 0.95); border:1px solid rgba(72,187,120,0.3); padding:2rem; border-radius:1rem; box-shadow:0 8px 32px rgba(0,0,0,0.3), 0 0 30px rgba(72,187,120,0.15); max-width:400px; width:90%;">
+                    <div style="font-size:4rem; margin-bottom:1rem;">✅</div>
+                    <h1 style="color:#48bb78; font-size:1.8rem; font-weight:700; margin:0 0 0.5rem 0;">Ready!</h1>
+                    <p style="color:#a1a1aa; font-size:1rem; margin:0;">All systems initialized</p>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+            status_text.empty()
+            details_text.empty()
+        else:
+            # Replace loading card with warning state
+            loading_html.markdown("""
+            <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:60vh; text-align:center;">
+                <div style="background:rgba(50, 50, 30, 0.95); border:1px solid rgba(236,201,75,0.3); padding:2rem; border-radius:1rem; box-shadow:0 8px 32px rgba(0,0,0,0.3), 0 0 30px rgba(236,201,75,0.15); max-width:400px; width:90%;">
+                    <div style="font-size:4rem; margin-bottom:1rem;">⚠️</div>
+                    <h1 style="color:#ecc94b; font-size:1.8rem; font-weight:700; margin:0 0 0.5rem 0;">Setup Required</h1>
+                    <p style="color:#a1a1aa; font-size:1rem; margin:0;">Run indexing to get started</p>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+            status_text.empty()
+            details_text.empty()
+        
+        time.sleep(0.5)  # Brief pause to show final status
         
     except Exception as e:
         logger.error(f"Startup error: {e}")
@@ -269,9 +342,11 @@ def show_startup_screen():
         st.session_state.engine_ready = False
         time.sleep(2)
     
-    # Mark as initialized and set cache flag for fast subsequent loads
+    # Mark as initialized and clean up loading state
     st.session_state.initialized = True
     st.session_state._resources_loaded = True
+    if "loading_phase" in st.session_state:
+        del st.session_state.loading_phase
     st.rerun()
 
 
@@ -353,6 +428,62 @@ def render_sidebar():
         
         show_sources = st.checkbox("Show sources", value=True)
         
+        # Advanced settings
+        with st.expander("🔧 Advanced Retrieval"):
+            st.markdown("##### 🎯 Improve Answer Quality")
+            
+            use_reranking = st.checkbox(
+                "Enable Reranking",
+                value=True,  # ON by default - always improves quality
+                help="Re-scores results with a more accurate model. Adds ~1-2s latency."
+            )
+            if use_reranking:
+                st.success("✅ **Enabled** — +25% precision (adds ~1-2s latency)")
+            else:
+                st.caption("⚠️ Disabled — faster but less accurate results")
+            
+            st.divider()
+            
+            use_query_expansion = st.checkbox(
+                "Enable Query Expansion",
+                value=False,
+                help="Automatically expands acronyms and financial terms."
+            )
+            if use_query_expansion:
+                st.info("📈 Expanding: CPI, GDP, YoY, MoM, Q1-Q4, BSP, IMF, etc.")
+            else:
+                st.caption("💡 Best for: Queries with **acronyms** (CPI, GDP, YoY) or **jargon**")
+            
+            st.divider()
+            
+            use_hybrid_search = st.checkbox(
+                "Enable Hybrid Search",
+                value=False,
+                help="Combines keyword matching (BM25) with semantic search."
+            )
+            if use_hybrid_search:
+                st.info("🔀 Using BM25 + Vector fusion (60/40 weight)")
+            else:
+                st.caption("💡 Best for: **Exact terms**, document IDs, specific numbers/dates")
+            
+            # Quick guide
+            st.divider()
+            with st.popover("📖 When to use each?"):
+                st.markdown("""
+                | Query Example | Rerank | Expand | Hybrid |
+                |---------------|:------:|:------:|:------:|
+                | "What is inflation?" | ✅ | ❌ | ❌ |
+                | "CPI growth 2024" | ✅ | ✅ | ✅ |
+                | "BSP circular 1234" | ✅ | ❌ | ✅ |
+                | "economic outlook" | ✅ | ❌ | ❌ |
+                | "YoY GDP Q1" | ✅ | ✅ | ✅ |
+                
+                **Quick tips:**
+                - 🎯 **Reranking**: Always recommended
+                - 📈 **Expansion**: For acronyms/jargon
+                - 🔀 **Hybrid**: For exact terms/IDs
+                """)
+        
         st.divider()
         
         # Session info
@@ -384,7 +515,7 @@ def render_sidebar():
             - Low relevance scores may indicate uncertainty
             """)
         
-        return top_k, show_sources
+        return top_k, show_sources, use_reranking, use_query_expansion, use_hybrid_search
 
 
 def render_header():
@@ -458,6 +589,17 @@ def render_metrics_summary(metrics) -> None:
     else:
         precision_color = "#f56565"  # red
     
+    # Query expansion indicator
+    expansion_str = ""
+    if hasattr(metrics, 'expansion_enabled') and metrics.expansion_enabled:
+        queries_used = getattr(metrics, 'queries_used', 1)
+        expansion_str = f'<span>🔄 Expanded: <strong>{queries_used}q</strong></span>'
+    
+    # Hybrid search indicator
+    hybrid_str = ""
+    if hasattr(metrics, 'hybrid_enabled') and metrics.hybrid_enabled:
+        hybrid_str = '<span>🔀 <strong>Hybrid</strong></span>'
+    
     # Render compact metrics bar
     st.markdown(f"""
     <div style="display: flex; gap: 1rem; flex-wrap: wrap; font-size: 0.8rem; color: #a0aec0; margin-top: 0.5rem; padding: 0.5rem; background: rgba(102,126,234,0.05); border-radius: 0.5rem;">
@@ -466,8 +608,29 @@ def render_metrics_summary(metrics) -> None:
         <span>📈 Avg Score: <strong>{avg_score:.0%}</strong></span>
         <span>📁 {sources} source{'s' if sources != 1 else ''}</span>
         <span>🎯 MRR: <strong>{metrics.mrr:.2f}</strong></span>
+        {expansion_str}
+        {hybrid_str}
     </div>
     """, unsafe_allow_html=True)
+    
+    # Optional: Detailed metrics expander
+    with st.expander("📈 Detailed Metrics", expanded=False):
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.markdown("**Latency**")
+            st.caption(f"TTFR: {metrics.ttfr_ms:.0f}ms")
+            st.caption(f"E2E: {metrics.e2e_ms:.0f}ms")
+        with col2:
+            st.markdown("**Retrieval Quality**")
+            st.caption(f"Precision@K: {metrics.precision_at_k:.1%}")
+            st.caption(f"MRR: {metrics.mrr:.3f}")
+            st.caption(f"Hit Rate: {metrics.hit_rate:.0%}")
+        with col3:
+            st.markdown("**Scores**")
+            st.caption(f"Avg: {metrics.avg_score:.1%}")
+            st.caption(f"Max: {metrics.max_score:.1%}")
+            st.caption(f"Min: {metrics.min_score:.1%}")
+            st.caption(f"Above threshold: {metrics.above_threshold}/{metrics.total_retrieved}")
 
 
 def render_chat_history(show_sources: bool):
@@ -514,6 +677,19 @@ def render_chat_history(show_sources: bool):
                 else:
                     precision_color = "#f56565"
                 
+                # Query expansion indicator
+                expansion_data = metrics_dict.get("expansion", {})
+                expansion_enabled = expansion_data.get("enabled", False)
+                expansion_str = ""
+                if expansion_enabled:
+                    queries_used = expansion_data.get("queries_used", 1)
+                    expansion_str = f'<span>🔄 {queries_used}q</span>'
+                
+                # Hybrid search indicator
+                hybrid_data = metrics_dict.get("hybrid", {})
+                hybrid_enabled = hybrid_data.get("enabled", False)
+                hybrid_str = '<span>🔀 Hybrid</span>' if hybrid_enabled else ""
+                
                 st.markdown(f"""
                 <div style="display: flex; gap: 1rem; flex-wrap: wrap; font-size: 0.8rem; color: #a0aec0; margin-top: 0.5rem; padding: 0.5rem; background: rgba(102,126,234,0.05); border-radius: 0.5rem;">
                     <span>⏱️ <strong>{latency_str}</strong></span>
@@ -521,6 +697,8 @@ def render_chat_history(show_sources: bool):
                     <span>📈 Score: <strong>{avg_score:.0%}</strong></span>
                     <span>📁 {sources} src</span>
                     <span>🎯 MRR: {mrr:.2f}</span>
+                    {expansion_str}
+                    {hybrid_str}
                 </div>
                 """, unsafe_allow_html=True)
             elif "latency_ms" in msg:
@@ -592,20 +770,40 @@ def main():
     """Main application entry point."""
     init_session_state()
     
-    # Show startup screen only on FIRST load (not cached yet)
-    if not st.session_state.initialized:
-        logger.info("📦 First load - showing startup screen...")
-        show_startup_screen()
-        return
+    # Fast path: if already initialized in this session, skip all checks
+    if st.session_state.initialized:
+        pass  # Continue to render UI
+    else:
+        # Check if we have a cached marker (set by previous initialization)
+        # This is a FAST check that doesn't trigger any imports
+        global _server_resources_loaded
+        if _server_resources_loaded:
+            # Resources already cached at server level - very fast init
+            logger.info("⚡ Fast refresh - using cached resources...")
+            vs_stats = get_cached_vector_store_stats()
+            st.session_state.rag_engine = get_cached_rag_engine()
+            st.session_state.engine_ready = vs_stats.get("exists", False) and vs_stats.get("vectors_count", 0) > 0
+            st.session_state.initialized = True
+        else:
+            # First load - show startup screen
+            logger.info("📦 First load - showing startup screen...")
+            show_startup_screen()
+            # Set server-level marker for future refreshes
+            _server_resources_loaded = True
+            return
     
     # Sidebar
-    top_k, show_sources = render_sidebar()
+    top_k, show_sources, use_reranking, use_query_expansion, use_hybrid_search = render_sidebar()
     
     # Header
     render_header()
     
-    # Get RAG engine
+    # Get RAG engine (with all enhancement settings)
     engine = get_rag_engine()
+    if engine:
+        engine.enable_reranking = use_reranking
+        engine.enable_query_expansion = use_query_expansion
+        engine.enable_hybrid_search = use_hybrid_search
     
     # Check if system is ready
     if not st.session_state.engine_ready or engine is None:
