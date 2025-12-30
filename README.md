@@ -124,8 +124,11 @@ docker-compose --profile indexing up indexer
 ### Indexing Options
 
 ```bash
-# Standard indexing
+# Standard indexing (1024-token chunks, good for general documents)
 uv run python scripts/index_documents.py
+
+# Small chunks (256 tokens) - RECOMMENDED for financial tables/structured data
+uv run python scripts/index_documents.py --strategy small
 
 # Preview what will be indexed (no changes)
 uv run python scripts/index_documents.py --dry-run
@@ -136,6 +139,14 @@ uv run python scripts/index_documents.py --update
 # Force rebuild (delete existing index)
 uv run python scripts/index_documents.py --force
 ```
+
+**Chunking Strategies:**
+| Strategy | Chunk Size | Best For |
+|----------|-----------|----------|
+| `sentence` (default) | 1024 tokens | General text, narratives |
+| `small` | 256 tokens | **Financial tables, structured data** |
+| `semantic` | 512 tokens | Medium granularity |
+| `large` | 2048 tokens | Dense context needed |
 
 **What indexing does:**
 - Loads all PDFs from `./domaindata/` (~500 files)
@@ -570,6 +581,23 @@ The system implements multiple safeguards:
 2. **Use Docker for WSL** - Native Linux is faster than WSL filesystem
 3. **Disable Query Expansion** if you don't need it (~20-30s latency)
 4. **BM25 first use is slow** - Index builds once per session
+
+### Improving Results with Financial Tables
+
+If the LLM returns **wrong values from financial tables** (e.g., wrong row or column):
+
+1. **Re-index with smaller chunks** for more precise retrieval:
+   ```bash
+   # Delete existing index and re-index with small chunks
+   rm -rf qdrant_db
+   uv run python scripts/index_documents.py --strategy small
+   ```
+
+2. **Use Hybrid Search (BM25)** - Enable in sidebar for exact term matching
+3. **Increase "Sources to retrieve"** slider to 8-10 for more context
+4. **Be more specific in your query** - Include exact row labels, footnotes, and dates
+
+The default chunk size (1024 tokens) may split financial tables across chunks. Using `--strategy small` (256 tokens) preserves table rows better but creates more chunks.
 
 ### Logs Location
 
