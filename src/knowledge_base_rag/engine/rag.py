@@ -52,6 +52,26 @@ logger = logging.getLogger(__name__)
 
 
 # =============================================================================
+# Module-level Caches for Expensive Components
+# =============================================================================
+# These caches persist across RAGEngine recreations during Streamlit reruns.
+# This is critical because Streamlit reruns the script on every interaction.
+
+# BM25 index is expensive to build (~10k documents)
+_bm25_cache = {
+    "index": None,       # BM25Index instance
+    "doc_ids": None,     # Mapping from BM25 index position to node_id
+    "doc_count": 0,      # Number of documents indexed (for validation)
+}
+
+# Reranker loads a cross-encoder model (slow)
+_reranker_cache = None
+
+# Query expander is lightweight but cache anyway
+_query_expander_cache = None
+
+
+# =============================================================================
 # Metrics Dataclasses
 # =============================================================================
 
@@ -285,11 +305,22 @@ class RAGEngine:
     
     @property
     def reranker(self):
-        """Get or create the reranker (lazy-loaded)."""
+        """Get or create the reranker (lazy-loaded).
+        
+        Uses module-level cache to persist across RAGEngine recreations.
+        """
+        global _reranker_cache
+        
+        # Check module-level cache first
+        if _reranker_cache is not None and self.enable_reranking:
+            self._reranker = _reranker_cache
+            return self._reranker
+        
         if self._reranker is None and self.enable_reranking:
             try:
                 from knowledge_base_rag.engine.retrieval import Reranker
                 self._reranker = Reranker()
+                _reranker_cache = self._reranker  # Store in module-level cache
                 logger.info("Reranker loaded successfully")
             except Exception as e:
                 logger.warning(f"Failed to load reranker: {e}")
@@ -298,11 +329,22 @@ class RAGEngine:
     
     @property
     def query_expander(self):
-        """Get or create the query expander (lazy-loaded)."""
+        """Get or create the query expander (lazy-loaded).
+        
+        Uses module-level cache to persist across RAGEngine recreations.
+        """
+        global _query_expander_cache
+        
+        # Check module-level cache first
+        if _query_expander_cache is not None and self.enable_query_expansion:
+            self._query_expander = _query_expander_cache
+            return self._query_expander
+        
         if self._query_expander is None and self.enable_query_expansion:
             try:
                 from knowledge_base_rag.engine.retrieval import QueryExpander
                 self._query_expander = QueryExpander()
+                _query_expander_cache = self._query_expander  # Store in module-level cache
                 logger.info("Query expander loaded successfully")
             except Exception as e:
                 logger.warning(f"Failed to load query expander: {e}")
@@ -311,7 +353,19 @@ class RAGEngine:
     
     @property
     def bm25_index(self):
-        """Get or create BM25 index for hybrid search (lazy-loaded)."""
+        """Get or create BM25 index for hybrid search (lazy-loaded).
+        
+        Uses module-level cache to persist across RAGEngine recreations.
+        """
+        global _bm25_cache
+        
+        # Check if module-level cache is valid
+        if _bm25_cache["index"] is not None and self.enable_hybrid_search:
+            # Reuse cached index
+            self._bm25_index = _bm25_cache["index"]
+            self._bm25_doc_ids = _bm25_cache["doc_ids"]
+            return self._bm25_index
+        
         if self._bm25_index is None and self.enable_hybrid_search:
             try:
                 from knowledge_base_rag.engine.retrieval import BM25Index
@@ -329,6 +383,12 @@ class RAGEngine:
                 if documents:
                     self._bm25_index = BM25Index(documents)
                     self._bm25_doc_ids = doc_ids  # Map index position to node_id
+                    
+                    # Store in module-level cache
+                    _bm25_cache["index"] = self._bm25_index
+                    _bm25_cache["doc_ids"] = self._bm25_doc_ids
+                    _bm25_cache["doc_count"] = len(documents)
+                    
                     logger.info(f"BM25 index built with {len(documents)} documents")
                 else:
                     logger.warning("No documents found for BM25 index")

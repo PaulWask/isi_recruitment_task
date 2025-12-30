@@ -60,6 +60,7 @@ ENV PYTHONPATH="/app/src:$PYTHONPATH"
 COPY --chown=appuser:appuser src/ ./src/
 COPY --chown=appuser:appuser scripts/ ./scripts/
 COPY --chown=appuser:appuser pyproject.toml ./
+COPY --chown=appuser:appuser .streamlit/ ./.streamlit/
 
 # Create directories for data (will be mounted as volumes)
 RUN mkdir -p /app/domaindata /app/qdrant_db \

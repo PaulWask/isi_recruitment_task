@@ -1,0 +1,40 @@
+# =============================================================================
+# Streamlit Configuration
+# =============================================================================
+# Optimized for Docker and production-like environments.
+#
+# Key settings:
+#   - File watcher disabled: Prevents cache invalidation on file changes
+#   - Gather usage stats disabled: No telemetry
+#   - Headless mode: No browser auto-open
+# =============================================================================
+
+[server]
+# Disable file watching to prevent cache invalidation when source files change
+# This is essential for Docker with volume mounts (dev mode)
+fileWatcherType = "none"
+
+# Don't automatically open browser
+headless = true
+
+# Enable CORS for container environments
+enableCORS = false
+
+# Enable XSRF protection
+enableXsrfProtection = true
+
+# Port configuration (can be overridden by env vars)
+port = 8501
+
+[browser]
+# Disable usage statistics
+gatherUsageStats = false
+
+[runner]
+# Fast reruns for better UX
+fastReruns = true
+
+[client]
+# Show error details in production (helpful for debugging)
+showErrorDetails = true
+

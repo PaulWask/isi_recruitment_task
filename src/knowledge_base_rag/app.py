@@ -61,9 +61,20 @@ if TYPE_CHECKING:
 # Chat history persistence file
 CHAT_HISTORY_FILE = Path("chat_history.json")
 
-# Server-level cache flag (persists across browser refreshes)
-# This is separate from st.session_state which resets per browser session
-_server_resources_loaded = False
+# Server-level cache flag (persists across browser refreshes and st.rerun())
+# Using a cached function instead of a global variable because globals reset on st.rerun()
+@st.cache_resource
+def _get_server_init_marker():
+    """Return a mutable container that persists across st.rerun() calls."""
+    return {"loaded": False}
+
+def is_server_initialized():
+    """Check if server resources have been initialized."""
+    return _get_server_init_marker()["loaded"]
+
+def set_server_initialized():
+    """Mark server resources as initialized."""
+    _get_server_init_marker()["loaded"] = True
 
 # Configure logging with professional timestamp format (HH:MM:SS.mmm)
 logging.basicConfig(
@@ -202,101 +213,33 @@ def init_session_state():
         st.session_state.initialized = False
 
 
-def show_startup_screen():
-    """Show a loading screen during first initialization with real progress.
+def do_initialization():
+    """Perform initialization synchronously (no UI updates during init).
     
-    Uses Streamlit's native spinner for reliable display.
-    No st.rerun() to avoid WSL latency issues.
+    This avoids Streamlit's client-server synchronization delays.
     """
-    logger.info("🎬 Starting initialization...")
+    logger.info("🎬 Initializing all components...")
     
-    # Simple, reliable loading UI using Streamlit's native components
-    st.markdown("""
-    <style>
-        @keyframes spin { to { transform: rotate(360deg); } }
-        @keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-8px); } }
-    </style>
-    """, unsafe_allow_html=True)
-    
-    # Create a centered container for loading
-    col1, col2, col3 = st.columns([1, 2, 1])
-    with col2:
-        # Loading card
-        st.markdown("""
-        <div style="background:rgba(30, 30, 50, 0.95); border:1px solid rgba(102,126,234,0.3); padding:2rem; border-radius:1rem; box-shadow:0 8px 32px rgba(0,0,0,0.3); text-align:center; margin-top:20vh;">
-            <div style="font-size:3rem; margin-bottom:1rem; animation:float 3s ease-in-out infinite;">📚</div>
-            <h1 style="background:linear-gradient(135deg, #667eea 0%, #764ba2 100%); -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text; font-size:1.5rem; font-weight:700; margin:0 0 1rem 0;">Knowledge Base Q&A</h1>
-        </div>
-        """, unsafe_allow_html=True)
+    try:
+        # Initialize all cached resources
+        vs_stats = get_cached_vector_store_stats()
+        st.session_state.rag_engine = get_cached_rag_engine()
         
-        # Progress bar and status
-        progress_bar = st.progress(0)
-        status_text = st.empty()
+        # Check readiness
+        vs_exists = vs_stats.get("exists", False)
+        vectors = vs_stats.get("vectors_count", 0)
+        st.session_state.engine_ready = vs_exists and vectors > 0
         
-        def update_status(step: str, progress: float, detail: str = ""):
-            """Update loading status."""
-            progress_bar.progress(progress)
-            if detail:
-                status_text.markdown(f"<p style='text-align:center; color:#667eea;'><b>{step}</b><br><small style='color:#a1a1aa;'>{detail}</small></p>", unsafe_allow_html=True)
-            else:
-                status_text.markdown(f"<p style='text-align:center; color:#667eea;'><b>{step}</b></p>", unsafe_allow_html=True)
+        logger.info(f"✅ Initialization complete: {vectors} vectors, ready={st.session_state.engine_ready}")
         
-        try:
-            # Step 1: Configuration
-            update_status("Loading configuration...", 0.1, f"LLM: {settings.llm_service}")
-            
-            # Step 2: Load embedding model + check vector store (CACHED)
-            update_status("Connecting to vector store...", 0.3, "Checking Qdrant...")
-            vs_stats = get_cached_vector_store_stats()
-            vs_exists = vs_stats.get("exists", False)
-            vectors = vs_stats.get("vectors_count", 0)
-            
-            if vs_exists and vectors > 0:
-                update_status("Vector store connected", 0.5, f"Found {vectors:,} vectors")
-            elif vs_exists:
-                update_status("Vector store empty", 0.5, "⚠️ Run indexing first")
-            else:
-                update_status("No index found", 0.5, "⚠️ Run indexing first")
-            
-            # Step 3: LLM check (CACHED for 30 seconds)
-            update_status("Checking language model...", 0.7, f"Service: {settings.llm_service}")
-            if settings.llm_service == "local":
-                llm_available = check_ollama_status()  # Cached!
-                if llm_available:
-                    update_status("LLM connected", 0.8, f"Ollama ({settings.llm_model})")
-                else:
-                    update_status("LLM offline", 0.8, "⚠️ Start Ollama to enable queries")
-            else:
-                has_key = bool(settings.groq_api_key)
-                if has_key:
-                    update_status("LLM configured", 0.8, f"Groq ({settings.groq_model})")
-                else:
-                    update_status("LLM not configured", 0.8, "⚠️ Set GROQ_API_KEY")
-            
-            # Step 4: Initialize RAG engine (CACHED)
-            update_status("Initializing RAG engine...", 0.9, "Building query pipeline...")
-            st.session_state.rag_engine = get_cached_rag_engine()
-            
-            # Engine is ready if we have vectors
-            st.session_state.engine_ready = vs_exists and vectors > 0
-            
-            # Complete
-            progress_bar.progress(1.0)
-            update_status("Ready!", 1.0, "")
-            
-        except Exception as e:
-            logger.error(f"Startup error: {e}")
-            logger.exception(e)
-            status_text.error(f"Initialization error: {e}")
-            st.session_state.engine_ready = False
+    except Exception as e:
+        logger.error(f"Initialization error: {e}")
+        logger.exception(e)
+        st.session_state.engine_ready = False
     
     # Mark as initialized
     st.session_state.initialized = True
-    
-    # Set server-level cache flag (persists across all sessions/refreshes)
-    global _server_resources_loaded
-    _server_resources_loaded = True
-    logger.info("✅ Initialization complete")
+    set_server_initialized()
 
 
 def get_rag_engine():
@@ -711,6 +654,28 @@ ollama pull llama3.2:3b
 
 def main():
     """Main application entry point."""
+    # Show loading indicator IMMEDIATELY (before any processing)
+    # This is the first thing the user sees
+    loading_placeholder = st.empty()
+    
+    # Check initialization state
+    needs_init = not st.session_state.get("initialized", False) and not is_server_initialized()
+    
+    if needs_init:
+        # First load - show loading message with animated spinner
+        loading_placeholder.markdown("""
+        <style>
+            @keyframes kb-spin { to { transform: rotate(360deg); } }
+            @keyframes kb-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        </style>
+        <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:50vh;">
+            <div style="font-size:3rem; margin-bottom:1rem;">📚</div>
+            <h2 style="color:#667eea; margin:0;">Loading Knowledge Base...</h2>
+            <p style="color:#888; margin-top:0.5rem; animation: kb-pulse 1.5s ease-in-out infinite;">First load may take ~10 seconds</p>
+            <div style="width:40px; height:40px; border:4px solid rgba(102,126,234,0.2); border-top-color:#667eea; border-radius:50%; margin-top:1.5rem; animation: kb-spin 1s linear infinite;"></div>
+        </div>
+        """, unsafe_allow_html=True)
+    
     init_session_state()
     
     # Fast path: if already initialized in this session, skip all checks
@@ -718,9 +683,7 @@ def main():
         pass  # Continue to render UI
     else:
         # Check if we have a cached marker (set by previous initialization)
-        # This is a FAST check that doesn't trigger any imports
-        global _server_resources_loaded
-        if _server_resources_loaded:
+        if is_server_initialized():
             # Resources already cached at server level - very fast init
             logger.info("⚡ Fast refresh - using cached resources...")
             vs_stats = get_cached_vector_store_stats()
@@ -728,11 +691,12 @@ def main():
             st.session_state.engine_ready = vs_stats.get("exists", False) and vs_stats.get("vectors_count", 0) > 0
             st.session_state.initialized = True
         else:
-            # First load - show startup screen then continue
+            # First load - do initialization synchronously
             logger.info("📦 First load - initializing...")
-            show_startup_screen()
-            # Note: _server_resources_loaded is set inside show_startup_screen()
-            # After initialization, continue to render UI (no return)
+            do_initialization()
+    
+    # Clear loading placeholder now that we're ready
+    loading_placeholder.empty()
     
     # Sidebar
     top_k, show_sources, use_reranking, use_query_expansion, use_hybrid_search = render_sidebar()

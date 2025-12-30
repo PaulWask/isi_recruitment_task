@@ -31,6 +31,8 @@ services:
       # Mount source code for hot-reload
       - ./src:/app/src:ro
       - ./scripts:/app/scripts:ro
+      # Mount Streamlit config (disables file watching for stable caching)
+      - ./.streamlit:/app/.streamlit:ro
       # Mount local qdrant_db (contains indexed vectors + text chunks)
       # Note: domaindata/ is NOT needed at runtime - only for indexing
       - ./qdrant_db:/app/qdrant_db
