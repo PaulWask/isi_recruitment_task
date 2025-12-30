@@ -1,6 +1,86 @@
 # Knowledge Base RAG System
 
-A question-answering system that retrieves relevant information from a 750MB domain knowledge base and generates accurate, grounded answers.
+A production-ready question-answering system that retrieves relevant information from a 750MB domain knowledge base and generates accurate, grounded answers using Retrieval-Augmented Generation (RAG).
+
+---
+
+## 🚀 Ground Zero: Complete Setup (5 Steps)
+
+**From zero to running in ~15-30 minutes:**
+
+### Step 1: Clone & Install
+```bash
+git clone <repository-url>
+cd isi_recruitment_task
+
+# Install UV (package manager)
+# Windows PowerShell:
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+# Linux/macOS:
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Install all dependencies
+uv sync --python 3.11
+```
+
+### Step 2: Download Domain Data (~750MB)
+```bash
+uv run python scripts/download_data.py
+```
+Or manual download: https://isi-ml-public.s3.us-east-1.amazonaws.com/domaindata.zip → extract to `./domaindata/`
+
+### Step 3: Setup LLM (Choose One)
+
+**Option A: Ollama (Local, Free, Private)**
+```bash
+# Install from https://ollama.ai/
+ollama pull llama3.2:3b
+ollama serve  # Keep running in background
+```
+
+**Option B: Groq (Cloud, Fast, Free Tier)**
+```bash
+# Get API key from https://console.groq.com/
+echo "LLM_SERVICE=groq" >> .env
+echo "GROQ_API_KEY=your-key-here" >> .env
+```
+
+### Step 4: Index Documents (One-Time, ~10-30 min)
+```bash
+uv run python scripts/index_documents.py
+```
+
+### Step 5: Run the App
+```bash
+uv run streamlit run src/knowledge_base_rag/app.py
+```
+Open http://localhost:8501 ✅
+
+---
+
+## 🐳 Docker Alternative (Even Simpler)
+
+If you have Docker installed, you can skip all the above:
+
+```bash
+# Clone the repo
+git clone <repository-url>
+cd isi_recruitment_task
+
+# Download data first (still required)
+# Download https://isi-ml-public.s3.us-east-1.amazonaws.com/domaindata.zip
+# Extract to ./domaindata/
+
+# Start everything with Docker
+docker-compose up --build
+
+# First time: Index documents (in another terminal)
+docker-compose --profile indexing up indexer
+
+# Access at http://localhost:8501
+```
+
+---
 
 ## Architecture
 
@@ -37,77 +117,16 @@ A question-answering system that retrieves relevant information from a 750MB dom
 - [UV](https://github.com/astral-sh/uv) package manager
 - [Ollama](https://ollama.ai/) (for local LLM) OR Groq API key
 
-## Quick Start
+## Detailed Setup (Alternative to Ground Zero)
 
-### 1. Clone and Install Dependencies
+> **Note:** The "Ground Zero" section at the top provides a quick 5-step setup. This section provides more details.
 
-```bash
-git clone <repository-url>
-cd isi_recruitment_task
-
-# Install UV (if not installed)
-# Windows:
-powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
-# Linux/macOS:
-curl -LsSf https://astral.sh/uv/install.sh | sh
-
-# Install dependencies
-uv sync --python 3.11
-```
-
-### 2. Download Domain Data
-
-Download and extract the domain knowledge base (~750MB):
+### Indexing Options
 
 ```bash
-uv run python scripts/download_data.py
-```
-
-This downloads from: https://isi-ml-public.s3.us-east-1.amazonaws.com/domaindata.zip
-
-**Manual download** (alternative):
-1. Download: https://isi-ml-public.s3.us-east-1.amazonaws.com/domaindata.zip
-2. Extract to `./domaindata/` directory
-
-Supported formats: PDF, DOCX, TXT, MD, HTML, PPTX, XLSX, CSV, JSON, RTF, XML, EPUB
-
-> ⚠️ **Important**: After downloading, you must index the data (Step 4) before using the application.
-
-### 3. Setup LLM
-
-**Option A: Local LLM (Ollama)** - Recommended for privacy
-```bash
-# Install Ollama from https://ollama.ai/
-# Then pull the model:
-ollama pull llama3.2:3b
-```
-
-**Option B: Cloud LLM (Groq)** - Faster, no local setup
-```bash
-# Get free API key from https://console.groq.com/
-# Add to .env file:
-echo "LLM_SERVICE=groq" >> .env
-echo "GROQ_API_KEY=your-api-key" >> .env
-```
-
-### 4. Index the Documents
-
-**This step is required after downloading the data.**
-
-```bash
+# Standard indexing
 uv run python scripts/index_documents.py
-```
 
-This will:
-- Load all documents from `./domaindata/` (501 files)
-- Chunk them for optimal retrieval (~5000 chunks)
-- Generate embeddings using HuggingFace all-MiniLM-L6-v2
-- Store vectors in local Qdrant database (`./qdrant_db/`)
-
-⏱️ **Expected time: 10-30 minutes** for 750MB of documents (first run downloads embedding model).
-
-**Options:**
-```bash
 # Preview what will be indexed (no changes)
 uv run python scripts/index_documents.py --dry-run
 
@@ -118,18 +137,25 @@ uv run python scripts/index_documents.py --update
 uv run python scripts/index_documents.py --force
 ```
 
-### 5. Run the Application
+**What indexing does:**
+- Loads all PDFs from `./domaindata/` (~500 files)
+- Chunks them for optimal retrieval (~5000 chunks)
+- Generates embeddings using HuggingFace `all-MiniLM-L6-v2`
+- Stores vectors in local Qdrant database (`./qdrant_db/`)
+
+⏱️ **Expected time: 10-30 minutes** (first run downloads embedding model)
+
+### Running the App
 
 ```bash
+# Standard way
 uv run streamlit run src/knowledge_base_rag/app.py
+
+# Using CLI command
+uv run kb-app
 ```
 
 Open http://localhost:8501 in your browser.
-
-**Alternative (using CLI command):**
-```bash
-uv run kb-app
-```
 
 ## Configuration
 
@@ -157,11 +183,13 @@ isi_recruitment_task/
 ├── .env.example            # Configuration template
 ├── README.md               # This file
 ├── DEVELOPMENT_PLAN.md     # Development roadmap
-├── Dockerfile              # Multi-stage Docker build
-├── docker-compose.yml      # Production deployment
-├── docker-compose.dev.yml  # Development with local index
+├── Dockerfile              # Multi-stage Docker build (CPU-optimized)
+├── docker-compose.yml      # Production deployment (4 services)
+├── docker-compose.dev.yml  # Development with local index (1 service)
+├── .dockerignore           # Files excluded from Docker build
 ├── domaindata/             # 750MB documents (gitignored)
 ├── qdrant_db/              # Vector database (gitignored)
+├── chat_history.json       # Persistent chat history (gitignored)
 ├── scripts/
 │   ├── download_data.py    # Download domain data from S3
 │   ├── index_documents.py  # Build vector search index
@@ -170,7 +198,7 @@ isi_recruitment_task/
 └── src/knowledge_base_rag/
     ├── __init__.py
     ├── cli.py              # CLI entry points (kb-index, kb-app)
-    ├── app.py              # Streamlit web app
+    ├── app.py              # Streamlit web app (main entry)
     ├── core/
     │   ├── config.py       # Pydantic settings
     │   └── llm.py          # Ollama/Groq LLM service
@@ -179,35 +207,42 @@ isi_recruitment_task/
     │   └── processor.py    # Document chunking
     ├── storage/
     │   ├── embeddings.py   # HuggingFace embeddings
-    │   └── vector_store.py # Qdrant vector store
+    │   └── vector_store.py # Qdrant vector store + get_all_documents()
     ├── engine/
-    │   ├── rag.py          # RAG query pipeline
-    │   └── retrieval.py    # Advanced retrieval (reranking, query expansion)
+    │   ├── rag.py          # RAG query pipeline + reranking
+    │   └── retrieval.py    # BM25, QueryExpander, CrossEncoderReranker
     └── ui/                 # UI components module
         ├── __init__.py     # Exports all components
         ├── styles.py       # CSS loader + color constants
-        ├── components.py   # HTML rendering functions
+        ├── components.py   # HTML rendering (text cleaning for PDFs)
         └── static/
-            ├── styles.css  # Main stylesheet (CSS variables, responsive)
+            ├── styles.css  # Main stylesheet (500+ lines, dark mode)
             └── templates/  # HTML template files
                 ├── source_card.html
                 ├── user_message.html
                 ├── assistant_message.html
                 ├── header.html
                 ├── warning.html
+                ├── loading.html
                 └── status_indicator.html
 ```
 
 ### UI Module
 
-The `ui/` module provides a professional, modular UI system:
+The `ui/` module provides a professional, modular UI system with dark mode support:
 
 | File | Purpose |
 |------|---------|
-| `styles.py` | `load_css()` function, `COLORS` dict |
-| `components.py` | `render_*()` functions that load HTML templates |
-| `static/styles.css` | 380+ lines of CSS with variables, responsive design |
-| `static/templates/*.html` | 6 HTML template files for components |
+| `styles.py` | `load_css()` function, `COLORS` dict, theme detection |
+| `components.py` | `render_*()` functions + PDF text cleaning |
+| `static/styles.css` | 500+ lines of CSS with variables, dark mode, responsive |
+| `static/templates/*.html` | 7 HTML template files for components |
+
+**Key features:**
+- **PDF text cleaning**: Removes embedded newlines for full-width display
+- **Dark mode**: CSS variables for automatic theme switching
+- **Score badges**: Gradient-colored relevance percentages
+- **Source metadata**: Page numbers, file paths, visible formatting
 
 **Usage in app.py:**
 ```python
@@ -221,17 +256,17 @@ st.markdown(render_source_card(...), unsafe_allow_html=True)
 
 The system includes professional retrieval enhancements available in the sidebar under **🔧 Advanced**:
 
-### Reranking (Cross-Encoder)
+### Reranking (Cross-Encoder) — Always Enabled
 
-When enabled, re-scores retrieved documents with a cross-encoder model for **+25% precision**.
+Reranking is **always enabled** because it consistently improves answer quality by ~25%. The system automatically re-scores retrieved documents with a cross-encoder model.
 
 ```
-Query → Vector Search (20 candidates) → Cross-Encoder Rerank → Top 5 Results
+Query → Vector Search (20 candidates) → Cross-Encoder Rerank → Top 6 Results
 ```
 
 - **Model**: `cross-encoder/ms-marco-MiniLM-L-6-v2`
-- **Latency**: Adds ~1-2 seconds
-- **When to use**: When precision matters more than speed
+- **Latency**: Adds ~3-5 seconds
+- **Impact**: +25% precision improvement
 
 ### Query Expansion
 
@@ -254,6 +289,22 @@ Automatically expands acronyms and domain terminology for **+15-20% recall**:
 - Short queries (1-2 words) that need context
 - Domain jargon with many synonyms
 - Searching across documents in multiple languages
+
+### Hybrid Search (BM25 + Vector)
+
+Combines semantic vector search with traditional keyword matching (BM25). Enable in sidebar under **🔧 Advanced**.
+
+```
+Query → Vector Search (semantic) ─┬→ Reciprocal Rank Fusion → Rerank → Results
+      → BM25 Search (keyword) ────┘
+```
+
+**When to use:**
+- Searching for exact IDs, codes, or numbers (e.g., "Document ID 12345")
+- Acronyms that might not have good embeddings
+- When vector search alone misses obvious keyword matches
+
+**Trade-off:** Adds ~1-2 seconds latency (BM25 index build on first use)
 
 ### Metrics Dashboard
 
@@ -391,6 +442,17 @@ environment:
   - GROQ_API_KEY=${GROQ_API_KEY}
 ```
 
+### Environment Variables (Docker)
+
+The Dockerfile sets these automatically for optimal Docker performance:
+
+| Variable | Value | Purpose |
+|----------|-------|---------|
+| `STREAMLIT_SERVER_FILE_WATCHER_TYPE` | `none` | Prevents restarts on file changes |
+| `STREAMLIT_RUNNER_FAST_RERUNS` | `true` | Faster UI updates |
+| `UV_EXTRA_INDEX_URL` | `pytorch.org/whl/cpu` | CPU-only PyTorch (smaller image) |
+| `NLTK_DATA` | `/app/.cache/nltk_data` | Pre-downloaded NLTK data |
+
 ## Development
 
 ```bash
@@ -478,6 +540,46 @@ The system implements multiple safeguards:
 3. **Low-score warnings**: Alert when retrieved docs are weakly relevant (<50%)
 4. **Confidence metrics**: Precision@K, MRR, hit rate visible to users
 5. **No-answer fallback**: System admits when it can't find relevant information
+
+## Troubleshooting
+
+### Common Issues
+
+| Problem | Solution |
+|---------|----------|
+| **"System Not Ready"** | Run indexing first: `uv run python scripts/index_documents.py` |
+| **Ollama connection error** | Ensure Ollama is running: `ollama serve` |
+| **Slow first load (~1-2 min)** | Normal - downloading embedding model (cached after) |
+| **Chat history error in Docker** | History file is mounted; clear via UI button, don't delete file |
+| **Answer stops when clicking checkbox** | Fixed - checkboxes are now locked during query processing |
+| **LLM says "no data" despite sources** | Check if sources are relevant (low % = wrong topic) |
+| **Page metadata shows "9/2024"** | This is edition date, not page number (document metadata varies) |
+
+### Docker-Specific Issues
+
+| Problem | Solution |
+|---------|----------|
+| **Build takes forever** | Normal first time (~10 min); uses CPU-only PyTorch |
+| **"Device or resource busy"** | Don't delete mounted files; use UI clear button |
+| **Container restarts on checkbox click** | Set `STREAMLIT_SERVER_FILE_WATCHER_TYPE=none` (already in Dockerfile) |
+| **No answers after restart** | Restart container: `docker restart rag-app-dev` |
+
+### Performance Tips
+
+1. **First load is slow** - Embedding model download is one-time
+2. **Use Docker for WSL** - Native Linux is faster than WSL filesystem
+3. **Disable Query Expansion** if you don't need it (~20-30s latency)
+4. **BM25 first use is slow** - Index builds once per session
+
+### Logs Location
+
+```bash
+# Docker logs
+docker logs rag-app-dev --tail 100
+
+# Local logs (in terminal running streamlit)
+# Timestamps format: HH:MM:SS.mmm
+```
 
 ## License
 
