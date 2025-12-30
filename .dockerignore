@@ -37,6 +37,8 @@ domaindata/
 qdrant_db/
 storage/
 *.zip
+chat_history.json
+.nltk_data/
 
 # Logs
 *.log

@@ -3,6 +3,11 @@
 # =============================================================================
 # Multi-stage build for optimal image size and security
 #
+# OPTIMIZATION: Uses CPU-only PyTorch (via UV_EXTRA_INDEX_URL)
+# - Default PyTorch with CUDA: ~8GB image
+# - CPU-only PyTorch: ~2.5GB image
+# Since we use Ollama for LLM (external service), we don't need GPU in container.
+#
 # Build: docker build -t knowledge-base-rag .
 # Run:   docker run -p 8501:8501 knowledge-base-rag
 # =============================================================================
@@ -29,9 +34,14 @@ WORKDIR /app
 COPY pyproject.toml uv.lock* ./
 
 # Create virtual environment and install dependencies
+# Use CPU-only PyTorch index to avoid downloading CUDA (~6GB savings)
+# --index-strategy unsafe-best-match: allows getting packages from any index (needed for requests compatibility)
 RUN uv venv /app/.venv
 ENV PATH="/app/.venv/bin:$PATH"
-RUN uv sync --no-dev --frozen
+RUN uv sync --no-dev \
+    --index-url https://pypi.org/simple \
+    --extra-index-url https://download.pytorch.org/whl/cpu \
+    --index-strategy unsafe-best-match
 
 # -----------------------------------------------------------------------------
 # Stage 2: Runtime stage (minimal)
@@ -62,11 +72,19 @@ COPY --chown=appuser:appuser scripts/ ./scripts/
 COPY --chown=appuser:appuser pyproject.toml ./
 
 # Create directories for data (will be mounted as volumes)
-RUN mkdir -p /app/domaindata /app/qdrant_db \
+RUN mkdir -p /app/domaindata /app/qdrant_db /app/.cache \
     && chown -R appuser:appuser /app
 
 # Switch to non-root user
 USER appuser
+
+# Pre-download embedding model (avoids 80MB download on first request)
+ENV HF_HOME=/app/.cache/huggingface
+ENV TRANSFORMERS_CACHE=/app/.cache/huggingface
+RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2')"
+
+# Compile Python bytecode for faster startup
+RUN python -m compileall -q /app/src
 
 # Environment variables
 ENV PYTHONUNBUFFERED=1
