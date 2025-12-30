@@ -375,9 +375,11 @@ def render_sidebar():
         
         if st.button("🗑️ Clear History", use_container_width=True):
             st.session_state.messages = []
-            # Also delete the saved history file
-            if CHAT_HISTORY_FILE.exists():
-                CHAT_HISTORY_FILE.unlink()
+            # Clear the saved history file (truncate instead of delete for Docker volumes)
+            try:
+                CHAT_HISTORY_FILE.write_text("[]")
+            except Exception:
+                pass  # Ignore if file doesn't exist or can't be written
             st.rerun()
         
         st.divider()
@@ -665,7 +667,7 @@ def main():
         <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:50vh;">
             <div style="font-size:3rem; margin-bottom:1rem;">📚</div>
             <h2 style="color:#667eea; margin:0;">Loading Knowledge Base...</h2>
-            <p style="color:#888; margin-top:0.5rem; animation: kb-pulse 1.5s ease-in-out infinite;">First load may take ~10 seconds</p>
+            <p style="color:#888; margin-top:0.5rem; animation: kb-pulse 1.5s ease-in-out infinite;">First load may take a moment...</p>
             <div style="width:40px; height:40px; border:4px solid rgba(102,126,234,0.2); border-top-color:#667eea; border-radius:50%; margin-top:1.5rem; animation: kb-spin 1s linear infinite;"></div>
         </div>
         """, unsafe_allow_html=True)
