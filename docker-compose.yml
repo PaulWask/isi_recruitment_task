@@ -1,0 +1,154 @@
+# =============================================================================
+# Knowledge Base RAG - Docker Compose (Production)
+# =============================================================================
+# Full stack deployment with all services in Docker.
+#
+# Quick Start:
+#   docker-compose up -d qdrant ollama    # Start infrastructure
+#   docker exec rag-ollama ollama pull llama3.2:3b  # Download model
+#   docker-compose --profile indexing up indexer    # Index documents (first time)
+#   docker-compose up app                 # Start the app
+#
+# Services:
+#   - app: Streamlit web application (port 8501)
+#   - qdrant: Vector database (port 6333)
+#   - ollama: Local LLM service (port 11434)
+#   - indexer: One-time indexing job (profile: indexing)
+#
+# Volumes:
+#   - qdrant_data: Persisted vector index
+#   - ollama_models: Downloaded LLM models
+# =============================================================================
+
+services:
+  # ===========================================================================
+  # Qdrant Vector Database
+  # ===========================================================================
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: rag-qdrant
+    restart: unless-stopped
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    environment:
+      - QDRANT__SERVICE__GRPC_PORT=6334
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # ===========================================================================
+  # Ollama LLM Service (Optional - for local LLM)
+  # ===========================================================================
+  ollama:
+    image: ollama/ollama:latest
+    container_name: rag-ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_models:/root/.ollama
+    # GPU support (uncomment if you have NVIDIA GPU)
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # ===========================================================================
+  # RAG Application (Streamlit)
+  # ===========================================================================
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: rag-app
+    restart: unless-stopped
+    ports:
+      - "8501:8501"
+    # Note: domaindata/ is NOT needed at runtime - vectors are stored in Qdrant
+    # volumes:
+    #   - ./domaindata:/app/domaindata:ro  # Only needed for indexer service
+    environment:
+      # Vector DB configuration (use Qdrant service)
+      - VECTOR_DB=qdrant_cloud
+      - QDRANT_CLOUD_URL=http://qdrant:6333
+      - QDRANT_CLOUD_API_KEY=
+      
+      # LLM configuration (use Ollama service)
+      - LLM_SERVICE=local
+      - OLLAMA_BASE_URL=http://ollama:11434
+      
+      # For Groq cloud LLM (alternative to Ollama)
+      # - LLM_SERVICE=groq
+      # - GROQ_API_KEY=${GROQ_API_KEY}
+      
+      # RAG settings
+      - CHUNK_SIZE=1024
+      - CHUNK_OVERLAP=128
+      - SIMILARITY_TOP_K=6
+      - COLLECTION_NAME=knowledge_base
+    depends_on:
+      qdrant:
+        condition: service_healthy
+      ollama:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # ===========================================================================
+  # Indexing Service (one-time job)
+  # ===========================================================================
+  indexer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: rag-indexer
+    profiles:
+      - indexing  # Only run with: docker-compose --profile indexing up indexer
+    volumes:
+      - ./domaindata:/app/domaindata:ro
+    environment:
+      - VECTOR_DB=qdrant_cloud
+      - QDRANT_CLOUD_URL=http://qdrant:6333
+      - QDRANT_CLOUD_API_KEY=
+      - KNOWLEDGE_BASE_DIR=/app/domaindata
+      - COLLECTION_NAME=knowledge_base
+    depends_on:
+      qdrant:
+        condition: service_healthy
+    command: ["python", "scripts/index_documents.py", "--force"]
+
+# =============================================================================
+# Volumes
+# =============================================================================
+volumes:
+  qdrant_data:
+    name: rag-qdrant-data
+  ollama_models:
+    name: rag-ollama-models
+
+# =============================================================================
+# Networks
+# =============================================================================
+networks:
+  default:
+    name: rag-network
+

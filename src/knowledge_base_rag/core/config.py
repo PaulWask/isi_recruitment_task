@@ -31,10 +31,23 @@ class RAGSettings(BaseSettings):
         case_sensitive=False,
     )
 
-    # Paths
+    # Paths (relative to project root or absolute)
     knowledge_base_dir: Path = Path("./domaindata")
     storage_dir: Path = Path("./storage")
     qdrant_path: Path = Path("./qdrant_db")
+
+    def get_absolute_qdrant_path(self) -> Path:
+        """Get absolute path to qdrant_db, resolving relative paths."""
+        if self.qdrant_path.is_absolute():
+            return self.qdrant_path
+        # Resolve relative to current working directory
+        return self.qdrant_path.resolve()
+
+    def get_absolute_knowledge_base_dir(self) -> Path:
+        """Get absolute path to knowledge base directory."""
+        if self.knowledge_base_dir.is_absolute():
+            return self.knowledge_base_dir
+        return self.knowledge_base_dir.resolve()
 
     # Vector DB switching
     vector_db: Literal["local", "qdrant_cloud"] = "local"

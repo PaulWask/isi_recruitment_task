@@ -1,0 +1,64 @@
+# =============================================================================
+# Knowledge Base RAG - Development Docker Compose
+# =============================================================================
+# For developers with EXISTING local index (qdrant_db/) and Ollama on host.
+#
+# Prerequisites:
+#   1. Local index exists: ./qdrant_db/
+#   2. Ollama running on host: ollama serve (or Docker: docker-compose up -d ollama)
+#
+# Run with: docker-compose -f docker-compose.dev.yml up --build
+#
+# Features:
+#   - Hot-reload: source code mounted from ./src
+#   - Uses local qdrant_db folder (no separate Qdrant container)
+#   - Connects to host's Ollama (or set OLLAMA_BASE_URL for Docker)
+# =============================================================================
+
+services:
+  # ===========================================================================
+  # RAG Application (Development mode with volume mounts)
+  # ===========================================================================
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: rag-app-dev
+    restart: unless-stopped
+    ports:
+      - "8501:8501"
+    volumes:
+      # Mount source code for hot-reload
+      - ./src:/app/src:ro
+      - ./scripts:/app/scripts:ro
+      # Mount local qdrant_db (contains indexed vectors + text chunks)
+      # Note: domaindata/ is NOT needed at runtime - only for indexing
+      - ./qdrant_db:/app/qdrant_db
+    environment:
+      # Use local Qdrant (in-process)
+      - VECTOR_DB=local
+      - QDRANT_PATH=/app/qdrant_db
+      
+      # LLM configuration
+      # Default: connects to host's Ollama
+      # To use Docker's Ollama: OLLAMA_BASE_URL=http://rag-ollama:11434
+      - LLM_SERVICE=${LLM_SERVICE:-local}
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      - GROQ_API_KEY=${GROQ_API_KEY:-}
+      
+      # RAG settings
+      - CHUNK_SIZE=1024
+      - CHUNK_OVERLAP=128
+      - SIMILARITY_TOP_K=6
+      - COLLECTION_NAME=knowledge_base
+    # For accessing host's Ollama
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+# =============================================================================
+# Networks
+# =============================================================================
+networks:
+  default:
+    name: rag-dev-network
+

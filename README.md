@@ -157,6 +157,9 @@ isi_recruitment_task/
 ├── .env.example            # Configuration template
 ├── README.md               # This file
 ├── DEVELOPMENT_PLAN.md     # Development roadmap
+├── Dockerfile              # Multi-stage Docker build
+├── docker-compose.yml      # Production deployment
+├── docker-compose.dev.yml  # Development with local index
 ├── domaindata/             # 750MB documents (gitignored)
 ├── qdrant_db/              # Vector database (gitignored)
 ├── scripts/
@@ -167,7 +170,7 @@ isi_recruitment_task/
 └── src/knowledge_base_rag/
     ├── __init__.py
     ├── cli.py              # CLI entry points (kb-index, kb-app)
-    ├── app.py              # Streamlit web app (Commit 11)
+    ├── app.py              # Streamlit web app
     ├── core/
     │   ├── config.py       # Pydantic settings
     │   └── llm.py          # Ollama/Groq LLM service
@@ -177,17 +180,164 @@ isi_recruitment_task/
     ├── storage/
     │   ├── embeddings.py   # HuggingFace embeddings
     │   └── vector_store.py # Qdrant vector store
-    └── engine/
-        └── rag.py          # RAG query pipeline
+    ├── engine/
+    │   └── rag.py          # RAG query pipeline
+    └── ui/                 # UI components module
+        ├── __init__.py     # Exports all components
+        ├── styles.py       # CSS loader + color constants
+        ├── components.py   # HTML rendering functions
+        └── static/
+            ├── styles.css  # Main stylesheet (CSS variables, responsive)
+            └── templates/  # HTML template files
+                ├── source_card.html
+                ├── user_message.html
+                ├── assistant_message.html
+                ├── header.html
+                ├── warning.html
+                └── status_indicator.html
+```
+
+### UI Module
+
+The `ui/` module provides a professional, modular UI system:
+
+| File | Purpose |
+|------|---------|
+| `styles.py` | `load_css()` function, `COLORS` dict |
+| `components.py` | `render_*()` functions that load HTML templates |
+| `static/styles.css` | 380+ lines of CSS with variables, responsive design |
+| `static/templates/*.html` | 6 HTML template files for components |
+
+**Usage in app.py:**
+```python
+from knowledge_base_rag.ui import load_css, render_source_card
+
+st.markdown(load_css(), unsafe_allow_html=True)
+st.markdown(render_source_card(...), unsafe_allow_html=True)
 ```
 
 ## Docker (Production)
 
+### Quick Start with Docker
+
 ```bash
-# Build and run with Docker Compose
+# Build and run all services
 docker-compose up --build
 
 # Access at http://localhost:8501
+```
+
+### Docker Services
+
+| Service | Port | Description |
+|---------|------|-------------|
+| `app` | 8501 | Streamlit web application |
+| `qdrant` | 6333 | Vector database |
+| `ollama` | 11434 | Local LLM (optional) |
+
+### First-Time Setup with Docker
+
+**Option A: If you already indexed locally** (have `qdrant_db/` folder):
+
+```bash
+# Use development compose (mounts local qdrant_db/)
+docker-compose -f docker-compose.dev.yml up
+```
+
+**Option B: Fresh Docker environment** (no local index):
+
+```bash
+# 1. Start Qdrant and Ollama first
+docker-compose up -d qdrant ollama
+
+# 2. Pull the LLM model (if using Ollama)
+docker exec rag-ollama ollama pull llama3.2:3b
+
+# 3. Run indexing inside Docker (one-time, ~10-30 min)
+docker-compose --profile indexing up indexer
+
+# 4. Start the app
+docker-compose up app
+```
+
+### Development Mode
+
+For local development with hot-reload and existing local index:
+
+```bash
+docker-compose -f docker-compose.dev.yml up
+```
+
+## Docker Compose Files - Comparison
+
+The project includes two Docker Compose configurations for different use cases:
+
+### `docker-compose.yml` (Production / Full Stack)
+
+**Best for:** Fresh installations, CI/CD, production deployments, or new team members.
+
+```bash
+docker-compose up --build
+```
+
+| Aspect | Details |
+|--------|---------|
+| **Services** | 4 (app, qdrant, ollama, indexer) |
+| **Qdrant** | Runs as separate Docker container |
+| **Ollama** | Runs as separate Docker container |
+| **Data** | Stored in Docker volumes (isolated) |
+| **Index** | Must be created with `--profile indexing` |
+| **Hot-reload** | ❌ No (code copied into image) |
+
+### `docker-compose.dev.yml` (Development / Local Index)
+
+**Best for:** Developers with existing local index (`qdrant_db/`) and Ollama on host.
+
+```bash
+docker-compose -f docker-compose.dev.yml up
+```
+
+| Aspect | Details |
+|--------|---------|
+| **Services** | 1 (only app) |
+| **Qdrant** | Uses local `./qdrant_db/` folder (mounted) |
+| **Ollama** | Connects to host's Ollama (`host.docker.internal:11434`) |
+| **Data** | Uses existing local files |
+| **Index** | Uses existing local index |
+| **Hot-reload** | ✅ Yes (source code mounted) |
+
+### Quick Reference
+
+| Scenario | Command |
+|----------|---------|
+| **You have local index + Ollama** | `docker-compose -f docker-compose.dev.yml up` |
+| **Fresh start (everything in Docker)** | `docker-compose up` |
+| **Build index in Docker** | `docker-compose --profile indexing up indexer` |
+| **Start only infrastructure** | `docker-compose up -d qdrant ollama` |
+| **No Docker (pure local)** | `uv run streamlit run src/knowledge_base_rag/app.py` |
+
+### Container Names
+
+| Compose File | Container Name | Port |
+|--------------|----------------|------|
+| `docker-compose.yml` | `rag-app` | 8501 |
+| `docker-compose.yml` | `rag-qdrant` | 6333 |
+| `docker-compose.yml` | `rag-ollama` | 11434 |
+| `docker-compose.dev.yml` | `rag-app-dev` | 8501 |
+
+### Using Groq Instead of Ollama
+
+Edit `docker-compose.yml` or set environment variable:
+
+```bash
+GROQ_API_KEY=your-key docker-compose up
+```
+
+And change in `docker-compose.yml`:
+```yaml
+environment:
+  - LLM_SERVICE=groq
+  - GROQ_API_KEY=${GROQ_API_KEY}
 ```
 
 ## Development

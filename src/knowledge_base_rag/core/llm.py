@@ -227,3 +227,29 @@ def get_llm(
     return service.llm
 
 
+def is_ollama_available() -> bool:
+    """Check if Ollama LLM service is available.
+
+    Convenience function to check Ollama availability without
+    creating an LLMService instance.
+
+    Returns:
+        True if Ollama is running and model is available, False otherwise.
+    """
+    try:
+        import httpx
+
+        response = httpx.get(
+            f"{settings.ollama_base_url}/api/tags",
+            timeout=5.0,
+        )
+        if response.status_code == 200:
+            models = response.json().get("models", [])
+            model_names = [m.get("name", "") for m in models]
+            return any(settings.llm_model in name for name in model_names)
+        return False
+    except Exception as e:
+        logger.warning(f"Ollama availability check failed: {e}")
+        return False
+
+

@@ -37,6 +37,47 @@ from knowledge_base_rag.core.config import settings
 
 logger = logging.getLogger(__name__)
 
+# Module-level singleton for Qdrant client to prevent concurrent access issues
+# Local file-based Qdrant doesn't support multiple connections
+_qdrant_client_singleton: Optional[QdrantClient] = None
+
+
+def get_qdrant_client() -> QdrantClient:
+    """Get singleton Qdrant client to avoid concurrent access issues.
+    
+    Local file-based Qdrant only allows one client connection at a time.
+    This singleton ensures we reuse the same client instance.
+    """
+    global _qdrant_client_singleton
+    
+    if _qdrant_client_singleton is None:
+        if settings.vector_db == "qdrant_cloud":
+            if not settings.qdrant_cloud_url:
+                raise ValueError("QDRANT_CLOUD_URL is required for cloud mode")
+            
+            if settings.qdrant_cloud_api_key:
+                _qdrant_client_singleton = QdrantClient(
+                    url=settings.qdrant_cloud_url,
+                    api_key=settings.qdrant_cloud_api_key,
+                )
+            else:
+                # Self-hosted Qdrant (Docker) - no API key needed
+                _qdrant_client_singleton = QdrantClient(url=settings.qdrant_cloud_url)
+            logger.info(f"Connected to Qdrant server: {settings.qdrant_cloud_url}")
+        else:
+            # Local file-based client
+            qdrant_path = settings.get_absolute_qdrant_path()
+            logger.info(f"Using local Qdrant at: {qdrant_path}")
+            logger.info(f"Qdrant path exists: {qdrant_path.exists()}")
+            
+            if not qdrant_path.exists():
+                qdrant_path.mkdir(parents=True, exist_ok=True)
+                logger.info(f"Created qdrant_db directory: {qdrant_path}")
+            
+            _qdrant_client_singleton = QdrantClient(path=str(qdrant_path))
+    
+    return _qdrant_client_singleton
+
 
 class VectorStoreManager:
     """Manage Qdrant vector store for document embeddings.
@@ -82,48 +123,10 @@ class VectorStoreManager:
 
     @property
     def client(self) -> QdrantClient:
-        """Get or create the Qdrant client (lazy initialization)."""
+        """Get the Qdrant client (uses module singleton for local mode)."""
         if self._client is None:
-            self._client = self._create_client()
+            self._client = get_qdrant_client()
         return self._client
-
-    def _create_client(self) -> QdrantClient:
-        """Create Qdrant client based on configuration.
-
-        Returns:
-            Configured QdrantClient instance.
-        """
-        if settings.vector_db == "qdrant_cloud":
-            return self._create_cloud_client()
-        else:
-            return self._create_local_client()
-
-    def _create_local_client(self) -> QdrantClient:
-        """Create local Qdrant client with disk persistence."""
-        qdrant_path = Path(settings.qdrant_path)
-        qdrant_path.mkdir(parents=True, exist_ok=True)
-
-        logger.info(f"Using local Qdrant at: {qdrant_path}")
-
-        return QdrantClient(path=str(qdrant_path))
-
-    def _create_cloud_client(self) -> QdrantClient:
-        """Create Qdrant Cloud client."""
-        # Validate configuration
-        if not settings.qdrant_cloud_url:
-            raise ValueError(
-                "QDRANT_CLOUD_URL required for cloud mode.\n"
-                "Get free cluster at: https://cloud.qdrant.io/"
-            )
-        if not settings.qdrant_cloud_api_key:
-            raise ValueError("QDRANT_CLOUD_API_KEY required for cloud mode.")
-
-        logger.info(f"Connecting to Qdrant Cloud: {settings.qdrant_cloud_url}")
-
-        return QdrantClient(
-            url=settings.qdrant_cloud_url,
-            api_key=settings.qdrant_cloud_api_key,
-        )
 
     @property
     def vector_store(self) -> QdrantVectorStore:
@@ -475,14 +478,28 @@ class VectorStoreManager:
         }
 
     def health_check(self) -> bool:
-        """Check if vector store is healthy and accessible.
+        """Check if vector store is healthy and has indexed data.
 
         Returns:
-            True if healthy, False otherwise.
+            True if healthy AND collection exists with vectors, False otherwise.
         """
         try:
-            # Try to get collections list
+            # Check if we can connect
             self.client.get_collections()
+            
+            # Also check if our collection exists and has data
+            if not self.collection_exists():
+                logger.warning(f"Collection '{self.collection_name}' does not exist")
+                return False
+            
+            # Check if collection has vectors
+            info = self.get_collection_info()
+            if info:
+                vectors_count = info.get("vectors_count", 0)
+                if vectors_count == 0:
+                    logger.warning(f"Collection '{self.collection_name}' is empty")
+                    return False
+            
             return True
         except Exception as e:
             logger.error(f"Vector store health check failed: {e}")
