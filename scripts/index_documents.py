@@ -35,13 +35,14 @@ os.environ["NLTK_DATA"] = str(_nltk_data_dir.resolve())
 import argparse
 import logging
 import time
+from typing import Literal
 
 # Add src to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from knowledge_base_rag.core.config import settings
 from knowledge_base_rag.data.loader import DocumentLoader
-from knowledge_base_rag.data.processor import DocumentProcessor
+from knowledge_base_rag.data.processor import DocumentProcessor, CHUNKING_PRESETS, ChunkingStrategy
 from knowledge_base_rag.storage.embeddings import get_embed_model
 from knowledge_base_rag.storage.vector_store import VectorStoreManager
 
@@ -126,13 +127,22 @@ def print_banner(mode: str = "full"):
     print()
 
 
-def print_config():
+def print_config(strategy: str = "sentence"):
     """Print current configuration."""
+    # Get actual chunk sizes from strategy preset
+    preset = CHUNKING_PRESETS.get(
+        ChunkingStrategy(strategy),
+        CHUNKING_PRESETS[ChunkingStrategy.SENTENCE]
+    )
+    chunk_size = preset["chunk_size"]
+    chunk_overlap = preset["chunk_overlap"]
+    
     print("📋 Configuration:")
     print(f"   • Knowledge base: {settings.knowledge_base_dir}")
     print(f"   • Collection: {settings.collection_name}")
-    print(f"   • Chunk size: {settings.chunk_size} chars")
-    print(f"   • Chunk overlap: {settings.chunk_overlap} chars")
+    print(f"   • Strategy: {strategy}")
+    print(f"   • Chunk size: {chunk_size} tokens")
+    print(f"   • Chunk overlap: {chunk_overlap} tokens")
     print(f"   • Embedding model: {settings.embed_model}")
     print(f"   • Vector DB: {settings.vector_db}")
     print()
@@ -237,6 +247,7 @@ def get_all_files(kb_path: Path) -> dict[str, Path]:
 def run_update(
     dry_run: bool = False,
     batch_size: int = 50,
+    strategy: Literal["sentence", "semantic", "small", "large"] = "sentence",
 ) -> bool:
     """Run incremental update - add only new documents.
     
@@ -250,7 +261,7 @@ def run_update(
     start_time = time.time()
     
     print_banner(mode="update")
-    print_config()
+    print_config(strategy=strategy)
     
     # Check knowledge base
     kb_path = Path(settings.knowledge_base_dir)
@@ -381,14 +392,11 @@ def run_update(
         return False
     
     # Step 2: Process/chunk documents
-    print("✂️  Step 2/3: Chunking new documents...")
+    print(f"✂️  Step 2/3: Chunking new documents (strategy: {strategy})...")
     chunk_start = time.time()
     
     try:
-        processor = DocumentProcessor(
-            chunk_size=settings.chunk_size,
-            chunk_overlap=settings.chunk_overlap,
-        )
+        processor = DocumentProcessor(strategy=strategy)
         chunks = processor.process_documents(documents, show_progress=True)
         
         chunk_time = time.time() - chunk_start
@@ -445,6 +453,7 @@ def run_indexing(
     force: bool = False,
     dry_run: bool = False,
     batch_size: int = 50,
+    strategy: Literal["sentence", "semantic", "small", "large"] = "sentence",
 ) -> bool:
     """Run the full indexing pipeline.
     
@@ -459,7 +468,7 @@ def run_indexing(
     start_time = time.time()
     
     print_banner()
-    print_config()
+    print_config(strategy=strategy)
     
     # Check knowledge base
     kb_path = Path(settings.knowledge_base_dir)
@@ -561,14 +570,11 @@ def run_indexing(
         return False
     
     # Step 2: Process/chunk documents
-    print("✂️  Step 2/3: Chunking documents...")
+    print(f"✂️  Step 2/3: Chunking documents (strategy: {strategy})...")
     chunk_start = time.time()
     
     try:
-        processor = DocumentProcessor(
-            chunk_size=settings.chunk_size,
-            chunk_overlap=settings.chunk_overlap,
-        )
+        processor = DocumentProcessor(strategy=strategy)
         chunks = processor.process_documents(documents, show_progress=True)
         
         chunk_time = time.time() - chunk_start
@@ -639,10 +645,11 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python scripts/index_documents.py            # First time indexing
-  python scripts/index_documents.py --update   # Add new documents only
-  python scripts/index_documents.py --force    # Force complete rebuild
-  python scripts/index_documents.py --dry-run  # Preview only
+  python scripts/index_documents.py                    # Default indexing (sentence strategy)
+  python scripts/index_documents.py --strategy small   # Small chunks for tables/financial data
+  python scripts/index_documents.py --update           # Add new documents only
+  python scripts/index_documents.py --force            # Force complete rebuild
+  python scripts/index_documents.py --dry-run          # Preview only
         """,
     )
     
@@ -671,6 +678,17 @@ Examples:
         help="Batch size for processing (default: 50)",
     )
     
+    parser.add_argument(
+        "--strategy", "-s",
+        choices=["sentence", "semantic", "small", "large"],
+        default="sentence",
+        help="""Chunking strategy (default: sentence).
+  sentence: 1024 tokens - balanced for general text
+  semantic: 512 tokens  - medium, semantic grouping
+  small:    256 tokens  - precise retrieval for tables/structured data
+  large:    2048 tokens - more context per chunk""",
+    )
+    
     args = parser.parse_args()
     
     # Validate arguments
@@ -685,12 +703,14 @@ Examples:
             success = run_update(
                 dry_run=args.dry_run,
                 batch_size=args.batch_size,
+                strategy=args.strategy,
             )
         else:
             success = run_indexing(
                 force=args.force,
                 dry_run=args.dry_run,
                 batch_size=args.batch_size,
+                strategy=args.strategy,
             )
         sys.exit(0 if success else 1)
         

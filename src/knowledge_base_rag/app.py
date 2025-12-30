@@ -235,7 +235,7 @@ def init_session_state():
     if "setting_show_sources" not in st.session_state:
         st.session_state.setting_show_sources = True
     if "setting_top_k" not in st.session_state:
-        st.session_state.setting_top_k = 6
+        st.session_state.setting_top_k = 10  # Default for small chunks (256 tokens)
 
 
 def do_initialization():
@@ -495,10 +495,10 @@ def render_message(role: str, content: str, sources: list | None = None, show_so
                     page_label = metadata.get("page_label")
                     file_type = metadata.get("file_type", "")
                     
-                    # Show more text (1000 chars) with ellipsis if truncated
+                    # Show more text (2500 chars) for better context visibility
                     full_text = src.get("text", "")
-                    if len(full_text) > 1000:
-                        text_preview = full_text[:1000] + "..."
+                    if len(full_text) > 2500:
+                        text_preview = full_text[:2500] + "..."
                     else:
                         text_preview = full_text
                     
@@ -744,7 +744,7 @@ def main():
             
             # Settings header (same as normal)
             st.markdown("## 🎯 Settings")
-            st.markdown(f"**Sources to retrieve:** {st.session_state.get('setting_top_k', 6)}")
+            st.markdown(f"**Sources to retrieve:** {st.session_state.get('setting_top_k', 10)}")
             st.markdown(f"**Show sources:** {'Yes' if st.session_state.get('setting_show_sources', True) else 'No'}")
             
             st.divider()
@@ -770,7 +770,7 @@ def main():
         # Get engine and process
         engine = get_rag_engine()
         if engine:
-            current_top_k = st.session_state.get("setting_top_k", 6)
+            current_top_k = st.session_state.get("setting_top_k", 10)
             current_query_expansion = st.session_state.get("setting_query_expansion", False)
             current_hybrid_search = st.session_state.get("setting_hybrid_search", False)
             

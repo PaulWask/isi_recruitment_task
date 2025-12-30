@@ -25,6 +25,9 @@ htmlcov
 venv
 ENV
 
+# Lock file (regenerate in Docker with CPU-only PyTorch)
+uv.lock
+
 # IDE
 .idea
 .vscode

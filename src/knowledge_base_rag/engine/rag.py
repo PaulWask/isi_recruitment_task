@@ -20,9 +20,10 @@ Why RAG over pure LLM:
 - Up-to-date: No need to retrain model for new documents
 
 Retrieval parameters:
-- similarity_top_k=6: Retrieve 6 most relevant chunks
-- This provides ~6K tokens of context (6 × 1024)
-- Balances context richness vs. noise
+- similarity_top_k=10: Retrieve 10 most relevant chunks
+- With small chunks (256 tokens): ~2.5K tokens of context
+- With default chunks (1024 tokens): ~10K tokens of context
+- Optimized for financial tables with smaller, focused chunks
 
 Metrics tracked:
 - Latency: TTFR (retrieval), TTFG (generation), E2E (total)
@@ -240,7 +241,7 @@ class RAGEngine:
         embed_model: Optional[BaseEmbedding] = None,
         similarity_top_k: Optional[int] = None,
         enable_reranking: bool = True,  # ON by default - always improves quality
-        rerank_top_k: int = 20,
+        rerank_top_k: int = 40,  # Increased from 20 for better recall with tabular data
         enable_query_expansion: bool = False,
         enable_hybrid_search: bool = False,
     ):
@@ -725,6 +726,8 @@ CRITICAL RULES:
 10. Identify the source institution when mentioned (e.g., "According to the Central Bank...")
 11. For TABLE DATA: Match the EXACT row label from the question to find the correct value. Don't confuse subtotals with specific line items.
 12. PAY CLOSE ATTENTION to footnotes (marked with *) that may specify conditions
+13. For FINANCIAL STATEMENTS: Look for the specific line item (e.g., "Bank balances with Bank Saudi Fransi") and find the value in the correct column (date/period). Don't report aggregate totals or values from different rows.
+14. COLUMN MATCHING: When a question specifies a date (e.g., "30 June 2024"), find the column with that exact date header and extract the value from that column only.
 
 RESPONSE FORMAT:
 - Lead with the direct answer to the question

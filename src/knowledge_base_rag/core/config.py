@@ -59,10 +59,13 @@ class RAGSettings(BaseSettings):
     llm_service: Literal["local", "groq"] = "local"
     groq_api_key: str = ""
 
-    # Optimized for 750MB knowledge base
-    chunk_size: int = 1024  # Balances context vs precision
-    chunk_overlap: int = 128  # Prevents context loss at boundaries
-    similarity_top_k: int = 6  # Enough context without overwhelming LLM
+    # Chunking defaults (can be overridden with --strategy in indexing)
+    chunk_size: int = 1024  # Default strategy; use --strategy small for 256
+    chunk_overlap: int = 128  # Default; small strategy uses 32
+    
+    # Retrieval settings - optimized for small chunks (256 tokens)
+    # With 256-token chunks, we need more chunks to get equivalent context
+    similarity_top_k: int = 10  # 10 x 256 = ~2560 tokens context
     similarity_cutoff: float = 0.7  # Filters low-relevance noise
 
     # Models
