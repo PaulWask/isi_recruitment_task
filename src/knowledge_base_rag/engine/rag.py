@@ -41,6 +41,7 @@ from llama_index.core.embeddings import BaseEmbedding
 from llama_index.core.query_engine import RetrieverQueryEngine
 from llama_index.core.retrievers import VectorIndexRetriever
 from llama_index.core.response_synthesizers import get_response_synthesizer, ResponseMode
+from llama_index.core.prompts import PromptTemplate
 
 from knowledge_base_rag.core.config import settings
 from knowledge_base_rag.core.llm import get_llm
@@ -372,10 +373,32 @@ class RAGEngine:
             similarity_top_k=top_k,
         )
         
-        # Create response synthesizer
+        # Custom QA prompt that enforces using exact terminology from sources
+        qa_prompt = PromptTemplate(
+            """You are a precise knowledge base assistant. Answer questions using ONLY the provided context.
+
+IMPORTANT RULES:
+1. Use EXACT terminology from the documents (e.g., "CCPI" not "CPI" if the source says "CCPI")
+2. Include specific numbers, dates, and percentages when available
+3. If the context doesn't contain the answer, say "The provided documents don't contain this information."
+4. Cite the source when possible (e.g., "According to the Central Bank of Sri Lanka...")
+5. Be concise but complete
+
+Context information:
+---------------------
+{context_str}
+---------------------
+
+Question: {query_str}
+
+Answer: """
+        )
+        
+        # Create response synthesizer with custom prompt
         response_synthesizer = get_response_synthesizer(
             llm=self.llm,
-            response_mode=ResponseMode.COMPACT,  # Compact context into single prompt
+            response_mode=ResponseMode.COMPACT,
+            text_qa_template=qa_prompt,
         )
         
         # Create query engine

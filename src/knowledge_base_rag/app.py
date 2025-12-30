@@ -19,12 +19,18 @@ Run with:
 # =============================================================================
 import json
 import logging
+import os
 import time
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import streamlit as st
+
+# Point NLTK to pre-downloaded data (from indexing step) to avoid runtime downloads
+_nltk_data_dir = Path(__file__).parent.parent.parent / ".nltk_data"
+if _nltk_data_dir.exists():
+    os.environ.setdefault("NLTK_DATA", str(_nltk_data_dir))
 
 # Light imports only (no LlamaIndex/NLTK trigger)
 from knowledge_base_rag.core.config import settings
@@ -302,37 +308,10 @@ def show_startup_screen():
         # Engine is ready if we have vectors
         st.session_state.engine_ready = vs_exists and vectors > 0
         
-        # Final status - CLEAR the loading card and show final state
+        # Final status - complete the progress bar
         progress_bar.progress(1.0)
-        
-        if st.session_state.engine_ready:
-            # Replace loading card with success state
-            loading_html.markdown("""
-            <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:60vh; text-align:center;">
-                <div style="background:rgba(30, 50, 30, 0.95); border:1px solid rgba(72,187,120,0.3); padding:2rem; border-radius:1rem; box-shadow:0 8px 32px rgba(0,0,0,0.3), 0 0 30px rgba(72,187,120,0.15); max-width:400px; width:90%;">
-                    <div style="font-size:4rem; margin-bottom:1rem;">✅</div>
-                    <h1 style="color:#48bb78; font-size:1.8rem; font-weight:700; margin:0 0 0.5rem 0;">Ready!</h1>
-                    <p style="color:#a1a1aa; font-size:1rem; margin:0;">All systems initialized</p>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-            status_text.empty()
-            details_text.empty()
-        else:
-            # Replace loading card with warning state
-            loading_html.markdown("""
-            <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:60vh; text-align:center;">
-                <div style="background:rgba(50, 50, 30, 0.95); border:1px solid rgba(236,201,75,0.3); padding:2rem; border-radius:1rem; box-shadow:0 8px 32px rgba(0,0,0,0.3), 0 0 30px rgba(236,201,75,0.15); max-width:400px; width:90%;">
-                    <div style="font-size:4rem; margin-bottom:1rem;">⚠️</div>
-                    <h1 style="color:#ecc94b; font-size:1.8rem; font-weight:700; margin:0 0 0.5rem 0;">Setup Required</h1>
-                    <p style="color:#a1a1aa; font-size:1rem; margin:0;">Run indexing to get started</p>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-            status_text.empty()
-            details_text.empty()
-        
-        time.sleep(0.5)  # Brief pause to show final status
+        update_status("Ready!", 1.0, "Loading main interface...")
+        # Don't show "Ready!" screen - go straight to app (avoids flash)
         
     except Exception as e:
         logger.error(f"Startup error: {e}")
@@ -428,60 +407,54 @@ def render_sidebar():
         
         show_sources = st.checkbox("Show sources", value=True)
         
-        # Advanced settings
+        # Advanced settings - Reranking is ALWAYS ON (best practice)
+        use_reranking = True  # Always enabled - proven to give best results
+        
         with st.expander("🔧 Advanced Retrieval"):
-            st.markdown("##### 🎯 Improve Answer Quality")
-            
-            use_reranking = st.checkbox(
-                "Enable Reranking",
-                value=True,  # ON by default - always improves quality
-                help="Re-scores results with a more accurate model. Adds ~1-2s latency."
-            )
-            if use_reranking:
-                st.success("✅ **Enabled** — +25% precision (adds ~1-2s latency)")
-            else:
-                st.caption("⚠️ Disabled — faster but less accurate results")
+            # Show reranking status (not toggleable)
+            st.success("✅ **Reranking: Always Enabled** — Cross-encoder for best accuracy")
+            st.caption("Adds ~3-5s latency but improves precision by ~25%")
             
             st.divider()
+            st.markdown("##### 🧪 Optional Enhancements")
+            st.caption("⚠️ These may increase latency significantly. Use only when needed.")
             
             use_query_expansion = st.checkbox(
-                "Enable Query Expansion",
+                "Query Expansion",
                 value=False,
-                help="Automatically expands acronyms and financial terms."
+                help="Expands acronyms. Adds ~20-30s latency (runs 3 queries)."
             )
             if use_query_expansion:
-                st.info("📈 Expanding: CPI, GDP, YoY, MoM, Q1-Q4, BSP, IMF, etc.")
+                st.warning("⚠️ Adds ~20-30s latency (3x queries)")
+                st.caption("Expanding: CPI→Consumer Price Index, GDP, YoY, etc.")
             else:
-                st.caption("💡 Best for: Queries with **acronyms** (CPI, GDP, YoY) or **jargon**")
-            
-            st.divider()
+                st.caption("💡 Only use for: Short queries with acronyms (CPI, GDP, YoY)")
             
             use_hybrid_search = st.checkbox(
-                "Enable Hybrid Search",
+                "Hybrid Search (BM25)",
                 value=False,
-                help="Combines keyword matching (BM25) with semantic search."
+                help="Adds keyword matching. Useful for exact terms/IDs."
             )
             if use_hybrid_search:
-                st.info("🔀 Using BM25 + Vector fusion (60/40 weight)")
+                st.info("🔀 BM25 + Vector fusion (60/40)")
             else:
-                st.caption("💡 Best for: **Exact terms**, document IDs, specific numbers/dates")
+                st.caption("💡 Only use for: Document IDs, specific numbers, exact terms")
             
             # Quick guide
             st.divider()
-            with st.popover("📖 When to use each?"):
+            with st.popover("📖 When to use these?"):
                 st.markdown("""
-                | Query Example | Rerank | Expand | Hybrid |
-                |---------------|:------:|:------:|:------:|
-                | "What is inflation?" | ✅ | ❌ | ❌ |
-                | "CPI growth 2024" | ✅ | ✅ | ✅ |
-                | "BSP circular 1234" | ✅ | ❌ | ✅ |
-                | "economic outlook" | ✅ | ❌ | ❌ |
-                | "YoY GDP Q1" | ✅ | ✅ | ✅ |
+                **Query Expansion** - Use when:
+                - Query contains acronyms (CPI, GDP, YoY)
+                - Very short queries (1-2 words)
+                - ⚠️ Adds ~20-30s latency
                 
-                **Quick tips:**
-                - 🎯 **Reranking**: Always recommended
-                - 📈 **Expansion**: For acronyms/jargon
-                - 🔀 **Hybrid**: For exact terms/IDs
+                **Hybrid Search** - Use when:
+                - Looking for document IDs (Circular 1234)
+                - Specific numbers/dates
+                - Exact phrase matching
+                
+                **For most queries: Just use default settings!**
                 """)
         
         st.divider()
