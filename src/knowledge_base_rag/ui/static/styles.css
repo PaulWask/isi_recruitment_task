@@ -140,6 +140,29 @@ body {
     font-weight: 400;
 }
 
+.main-header .tip-box {
+    background: rgba(102, 126, 234, 0.08);
+    border: 1px solid rgba(102, 126, 234, 0.2);
+    border-radius: var(--radius-md);
+    padding: var(--space-sm) var(--space-md);
+    margin-top: var(--space-md);
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+    display: inline-block;
+}
+
+.main-header .tip-box strong {
+    color: var(--accent-primary);
+}
+
+.main-header .tip-box em {
+    color: var(--text-primary);
+    font-style: normal;
+    background: rgba(102, 126, 234, 0.1);
+    padding: 0.1rem 0.3rem;
+    border-radius: 3px;
+}
+
 /* ==========================================================================
    Chat Messages - Professional Dark Mode
    ========================================================================== */
@@ -160,12 +183,14 @@ body {
     background: var(--bg-card);
     border: 1px solid var(--border-light);
     color: var(--text-primary);
-    padding: var(--space-lg);
+    padding: var(--space-xl);
     border-radius: var(--radius-xl) var(--radius-xl) var(--radius-xl) var(--radius-sm);
-    margin: var(--space-sm) 0;
-    max-width: 90%;
-    box-shadow: var(--shadow-sm);
-    line-height: 1.7;
+    margin: var(--space-md) 0;
+    max-width: 100%;
+    width: 100%;
+    box-shadow: var(--shadow-md);
+    line-height: 1.8;
+    font-size: 1rem;
 }
 
 .message-content {
@@ -174,106 +199,191 @@ body {
 }
 
 /* ==========================================================================
-   Source Cards - Sleek Dark Design
+   Source Cards - Premium Professional Design (FULL WIDTH)
    ========================================================================== */
 .source-card {
     background: var(--bg-card);
     border: 1px solid var(--border-light);
     border-radius: var(--radius-lg);
-    padding: var(--space-md);
-    margin: var(--space-sm) 0;
-    font-size: 0.875rem;
-    box-shadow: var(--shadow-sm);
+    padding: var(--space-lg);
+    margin: var(--space-md) 0;
+    font-size: 0.9rem;
+    box-shadow: var(--shadow-md);
     transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    /* FULL WIDTH - no constraints */
+    width: 100% !important;
+    max-width: 100% !important;
+    box-sizing: border-box;
 }
 
 .source-card:hover {
     border-color: var(--accent-primary);
-    box-shadow: var(--shadow-md), 0 0 0 1px var(--border-accent);
-    transform: translateY(-2px);
+    box-shadow: var(--shadow-lg), 0 0 0 2px var(--border-accent);
+    transform: translateY(-3px);
 }
 
 .source-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: var(--space-sm);
+    margin-bottom: var(--space-md);
+    padding-bottom: var(--space-sm);
+    border-bottom: 1px solid var(--border-light);
 }
 
 .source-filename {
-    font-weight: 600;
+    font-weight: 700;
     color: var(--accent-primary);
     display: flex;
     align-items: center;
-    gap: var(--space-xs);
-    margin-top: var(--space-xs);
-    font-size: 0.9rem;
+    gap: var(--space-sm);
+    margin-top: var(--space-sm);
+    font-size: 1rem;
+    letter-spacing: -0.01em;
 }
 
 .source-text {
-    margin: var(--space-sm) 0;
-    color: var(--text-secondary);
-    font-size: 0.85rem;
-    line-height: 1.65;
+    margin: var(--space-md) 0;
+    color: var(--text-primary);
+    font-size: 0.95rem;
+    line-height: 1.75;
     background: var(--bg-tertiary);
-    padding: var(--space-md);
+    padding: var(--space-lg);
     border-radius: var(--radius-md);
-    border-left: 3px solid var(--accent-primary);
-    /* Better text handling for longer content */
+    border-left: 4px solid var(--accent-primary);
+    /* FULL WIDTH - USE IT ALL */
+    width: 100% !important;
+    max-width: 100% !important;
+    box-sizing: border-box;
     word-wrap: break-word;
     overflow-wrap: break-word;
-    white-space: pre-wrap;
-    max-height: 300px;
+    /* NORMAL text flow - don't preserve PDF line breaks */
+    white-space: normal !important;
+    max-height: 400px;
     overflow-y: auto;
+    /* Better readability */
+    letter-spacing: 0.01em;
+    display: block !important;
+    /* Text justification for better flow */
+    text-align: justify;
+    hyphens: auto;
+}
+
+/* Scrollbar styling for source text */
+.source-text::-webkit-scrollbar {
+    width: 8px;
+}
+
+.source-text::-webkit-scrollbar-track {
+    background: var(--bg-secondary);
+    border-radius: 4px;
+}
+
+.source-text::-webkit-scrollbar-thumb {
+    background: var(--accent-primary);
+    border-radius: 4px;
+}
+
+.source-text::-webkit-scrollbar-thumb:hover {
+    background: var(--accent-secondary);
 }
 
 .source-metadata {
-    color: var(--text-muted);
-    font-size: 0.75rem;
-    font-weight: 500;
+    color: var(--text-primary);
+    font-size: 0.85rem;
+    font-weight: 600;
+    background: var(--bg-tertiary);
+    padding: var(--space-xs) var(--space-sm);
+    border-radius: var(--radius-sm);
+    letter-spacing: 0.02em;
 }
 
 .source-path {
     font-family: 'JetBrains Mono', 'Fira Code', 'Monaco', monospace;
-    font-size: 0.7rem;
-    color: var(--text-muted);
+    font-size: 0.75rem;
+    color: var(--text-secondary);
     word-break: break-all;
     background: var(--bg-code);
-    padding: var(--space-xs) var(--space-sm);
+    padding: var(--space-sm) var(--space-md);
     border-radius: var(--radius-sm);
-    margin-top: var(--space-xs);
+    margin-top: var(--space-sm);
     display: block;
+    border: 1px solid var(--border-light);
+}
+
+/* Sources container - FORCE full width */
+.sources-container {
+    width: 100% !important;
+    max-width: 100% !important;
+}
+
+/* Expander for sources - FULL WIDTH */
+.stExpander {
+    border: none !important;
+    background: transparent !important;
+    width: 100% !important;
+    max-width: 100% !important;
+}
+
+.stExpander > div {
+    width: 100% !important;
+    max-width: 100% !important;
+}
+
+.stExpander > div:first-child {
+    background: var(--bg-secondary) !important;
+    border-radius: var(--radius-lg) !important;
+    padding: var(--space-sm) var(--space-md) !important;
+}
+
+/* Override Streamlit's default container width */
+.stMarkdown, .stMarkdown > div {
+    width: 100% !important;
+    max-width: 100% !important;
+}
+
+/* Source text - FULL WIDTH, no narrow constraints */
+.element-container:has(.source-card) {
+    width: 100% !important;
+    max-width: 100% !important;
 }
 
 /* ==========================================================================
-   Score Badges - Vibrant Dark Mode
+   Score Badges - Bold & Visible
    ========================================================================== */
 .source-score {
     display: inline-flex;
     align-items: center;
-    padding: var(--space-xs) var(--space-sm);
+    justify-content: center;
+    padding: var(--space-sm) var(--space-md);
     border-radius: var(--radius-full);
-    font-size: 0.75rem;
-    font-weight: 700;
-    letter-spacing: 0.02em;
+    font-size: 0.85rem;
+    font-weight: 800;
+    letter-spacing: 0.03em;
+    min-width: 50px;
+    text-align: center;
+    box-shadow: var(--shadow-sm);
 }
 
 .score-high {
-    background: rgba(16, 185, 129, 0.15);
-    color: #34d399;
-    border: 1px solid rgba(16, 185, 129, 0.3);
+    background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+    color: #ffffff;
+    border: 2px solid #34d399;
+    box-shadow: 0 2px 8px rgba(16, 185, 129, 0.4);
 }
 
 .score-medium {
-    background: rgba(245, 158, 11, 0.15);
-    color: #fbbf24;
-    border: 1px solid rgba(245, 158, 11, 0.3);
+    background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+    color: #ffffff;
+    border: 2px solid #fbbf24;
+    box-shadow: 0 2px 8px rgba(245, 158, 11, 0.4);
 }
 
 .score-low {
-    background: rgba(239, 68, 68, 0.15);
-    color: #f87171;
-    border: 1px solid rgba(239, 68, 68, 0.3);
+    background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+    color: #ffffff;
+    border: 2px solid #f87171;
+    box-shadow: 0 2px 8px rgba(239, 68, 68, 0.4);
 }
 
 /* ==========================================================================
@@ -499,4 +609,164 @@ details[open] summary {
     .score-low {
         border-width: 2px;
     }
+}
+
+/* ==========================================================================
+   Stop Button Styling
+   ========================================================================== */
+
+/* ==========================================================================
+   Send Button Styling (accent gradient - purple/blue)
+   ========================================================================== */
+
+/* Secondary buttons and form submit buttons - accent gradient */
+.stButton > button[kind="secondary"],
+.stFormSubmitButton > button[kind="secondary"],
+.stFormSubmitButton > button:not([kind="primary"]) {
+    background: var(--accent-gradient) !important;
+    border: none !important;
+    color: white !important;
+    font-weight: 600 !important;
+    box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3) !important;
+    transition: all 0.2s ease !important;
+}
+
+.stButton > button[kind="secondary"]:hover,
+.stFormSubmitButton > button[kind="secondary"]:hover,
+.stFormSubmitButton > button:not([kind="primary"]):hover {
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4) !important;
+    transform: translateY(-1px) !important;
+}
+
+.stButton > button[kind="secondary"]:active,
+.stFormSubmitButton > button[kind="secondary"]:active,
+.stFormSubmitButton > button:not([kind="primary"]):active {
+    transform: translateY(0) !important;
+}
+
+/* ==========================================================================
+   Stop Button Styling (red)
+   ========================================================================== */
+
+/* Primary (red) stop button */
+.stButton > button[kind="primary"] {
+    background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%) !important;
+    border: none !important;
+    color: white !important;
+    font-weight: 600 !important;
+    box-shadow: 0 2px 8px rgba(239, 68, 68, 0.3) !important;
+    transition: all 0.2s ease !important;
+}
+
+.stButton > button[kind="primary"]:hover {
+    background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%) !important;
+    box-shadow: 0 4px 12px rgba(239, 68, 68, 0.4) !important;
+    transform: translateY(-1px) !important;
+}
+
+.stButton > button[kind="primary"]:active {
+    transform: translateY(0) !important;
+}
+
+/* Processing indicator in input */
+.stTextInput input:disabled {
+    background: rgba(102, 126, 234, 0.1) !important;
+    color: var(--text-secondary) !important;
+    font-style: italic;
+}
+
+/* Text input styling - taller and more prominent */
+.stTextInput input {
+    border-radius: var(--radius-md) !important;
+    border: 1px solid var(--border-medium) !important;
+    padding: 0.875rem 1rem !important;
+    min-height: 50px !important;
+    font-size: 1rem !important;
+}
+
+.stTextInput input:focus {
+    border-color: var(--accent-primary) !important;
+    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.15) !important;
+}
+
+/* Text area styling - expandable with scroll */
+.stTextArea textarea {
+    border-radius: var(--radius-md) !important;
+    border: 1px solid var(--border-medium) !important;
+    padding: 0.875rem 1rem !important;
+    min-height: 80px !important;
+    max-height: 200px !important;
+    font-size: 1rem !important;
+    resize: vertical !important;
+    overflow-y: auto !important;
+}
+
+.stTextArea textarea:focus {
+    border-color: var(--accent-primary) !important;
+    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.15) !important;
+}
+
+/* ==========================================================================
+   Chat Input Container Styling
+   ========================================================================== */
+
+/* Add margin above the input area */
+.stTextInput {
+    margin-top: 1rem !important;
+}
+
+/* Ensure input area stays at bottom with proper spacing */
+.element-container:has(.stTextInput) {
+    margin-top: 1.5rem !important;
+}
+
+/* ==========================================================================
+   Inline Chat Input + Button Row
+   ========================================================================== */
+
+/* Force the columns containing input + button to be inline and aligned */
+div[data-testid="stHorizontalBlock"]:has(input[placeholder*="Ask a question"]),
+div[data-testid="stHorizontalBlock"]:has(input[value*="Processing"]) {
+    display: flex !important;
+    flex-direction: row !important;
+    flex-wrap: nowrap !important;
+    align-items: flex-end !important;
+    gap: 0.75rem !important;
+}
+
+/* Input column - take remaining space */
+div[data-testid="stHorizontalBlock"]:has(input[placeholder*="Ask a question"]) > div[data-testid="column"]:first-child,
+div[data-testid="stHorizontalBlock"]:has(input[value*="Processing"]) > div[data-testid="column"]:first-child {
+    flex: 1 1 auto !important;
+    min-width: 0 !important;
+}
+
+/* Button column - fixed width */
+div[data-testid="stHorizontalBlock"]:has(input[placeholder*="Ask a question"]) > div[data-testid="column"]:last-child,
+div[data-testid="stHorizontalBlock"]:has(input[value*="Processing"]) > div[data-testid="column"]:last-child {
+    flex: 0 0 auto !important;
+    width: 120px !important;
+    min-width: 100px !important;
+}
+
+/* Remove extra margin from button container */
+div[data-testid="stHorizontalBlock"] .stButton {
+    margin-top: 0 !important;
+    margin-bottom: 0 !important;
+}
+
+/* Ensure button aligns with input */
+div[data-testid="stHorizontalBlock"] .stButton button {
+    height: 42px !important;
+    min-height: 42px !important;
+}
+
+/* Metrics bar spacing */
+.metrics-bar {
+    margin-bottom: 1.5rem !important;
+}
+
+/* Source cards container spacing */
+.sources-container {
+    margin-bottom: 1.5rem !important;
 }

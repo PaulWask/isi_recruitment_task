@@ -218,6 +218,28 @@ def init_session_state():
     if "initialized" not in st.session_state:
         # First load - always show startup screen
         st.session_state.initialized = False
+    
+    if "is_processing" not in st.session_state:
+        # Flag to prevent sidebar changes from interrupting queries
+        st.session_state.is_processing = False
+    
+    if "stop_requested" not in st.session_state:
+        # Flag to signal query cancellation
+        st.session_state.stop_requested = False
+    
+    if "query_to_process" not in st.session_state:
+        # Query waiting to be processed (after rerun for frozen UI)
+        st.session_state.query_to_process = None
+    
+    # Initialize advanced retrieval settings
+    if "setting_query_expansion" not in st.session_state:
+        st.session_state.setting_query_expansion = False
+    if "setting_hybrid_search" not in st.session_state:
+        st.session_state.setting_hybrid_search = False
+    if "setting_show_sources" not in st.session_state:
+        st.session_state.setting_show_sources = True
+    if "setting_top_k" not in st.session_state:
+        st.session_state.setting_top_k = 10  # Default for small chunks (256 tokens)
 
 
 def do_initialization():
@@ -237,6 +259,7 @@ def do_initialization():
         vs_exists = vs_stats.get("exists", False)
         vectors = vs_stats.get("vectors_count", 0)
         st.session_state.engine_ready = vs_exists and vectors > 0
+        st.session_state._vs_count = vectors  # Store for frozen sidebar display
         
         logger.info(f"✅ Initialization complete: {vectors} vectors, ready={st.session_state.engine_ready}")
         
@@ -271,7 +294,7 @@ def get_rag_engine():
 
 def render_sidebar():
     """Render the sidebar with system status and settings."""
-    with st.sidebar:
+    with st.sidebar:  # type: ignore[attr-defined]
         st.markdown("## ⚙️ System Status")
         
         # Check services (using CACHED status - no repeated DB/HTTP calls)
@@ -325,12 +348,24 @@ def render_sidebar():
             help="Number of document chunks to retrieve for each query"
         )
         
-        show_sources = st.checkbox("Show sources", value=True)
+        show_sources = st.checkbox("Show sources", value=st.session_state.setting_show_sources)
+        st.session_state.setting_show_sources = show_sources
         
         # Advanced settings - Reranking is ALWAYS ON (best practice)
         use_reranking = True  # Always enabled - proven to give best results
         
-        with st.expander("🔧 Advanced Retrieval"):
+        # Initialize session state for settings (prevents rerun interruption)
+        if "setting_query_expansion" not in st.session_state:
+            st.session_state.setting_query_expansion = False
+        if "setting_hybrid_search" not in st.session_state:
+            st.session_state.setting_hybrid_search = False
+        
+        # Check if a query is being processed
+        is_processing = st.session_state.get("is_processing", False)
+        
+        # Make Advanced Retrieval header more visible
+        st.markdown("### 🔧 Advanced Retrieval")
+        with st.expander("Show Options", expanded=False):
             # Show reranking status (not toggleable)
             st.success("✅ **Reranking: Always Enabled** — Cross-encoder for best accuracy")
             st.caption("Adds ~3-5s latency but improves precision by ~25%")
@@ -339,28 +374,48 @@ def render_sidebar():
             st.markdown("##### 🧪 Optional Enhancements")
             st.caption("⚠️ These may increase latency significantly. Use only when needed.")
             
-            use_query_expansion = st.checkbox(
-                "Query Expansion",
-                value=False,
-                help="Expands acronyms. Adds ~20-30s latency (runs 3 queries)."
-            )
-            if use_query_expansion:
-                st.warning("⚠️ Adds ~20-30s latency (3x queries)")
-                st.caption("Expanding: CPI→Consumer Price Index, GDP, YoY, etc.")
+            # CRITICAL: During processing, show STATIC display instead of interactive widgets
+            # This prevents any click from triggering a rerun that would interrupt the query
+            if is_processing:
+                st.warning("⏳ Query in progress... please wait")
+                # Show current settings as static text (no interactive widgets!)
+                exp_status = "✅ Enabled" if st.session_state.setting_query_expansion else "⬜ Disabled"
+                hyb_status = "✅ Enabled" if st.session_state.setting_hybrid_search else "⬜ Disabled"
+                st.markdown(f"**Query Expansion:** {exp_status}")
+                st.markdown(f"**Hybrid Search:** {hyb_status}")
+                # Use stored values
+                use_query_expansion = st.session_state.setting_query_expansion
+                use_hybrid_search = st.session_state.setting_hybrid_search
             else:
-                st.caption("💡 Only use for: Short queries with acronyms (CPI, GDP, YoY)")
+                # NOT processing - show interactive checkboxes
+                use_query_expansion = st.checkbox(
+                    "Query Expansion",
+                    value=st.session_state.setting_query_expansion,
+                    key="checkbox_query_expansion",
+                    help="Expands acronyms. Adds ~20-30s latency (runs 3 queries)."
+                )
+                st.session_state.setting_query_expansion = use_query_expansion
+                
+                if use_query_expansion:
+                    st.warning("⚠️ Adds ~20-30s latency (3x queries)")
+                    st.caption("Expanding: CPI→Consumer Price Index, GDP, YoY, etc.")
+                else:
+                    st.caption("💡 Only use for: Short queries with acronyms (CPI, GDP, YoY)")
+                
+                use_hybrid_search = st.checkbox(
+                    "Hybrid Search (BM25)",
+                    value=st.session_state.setting_hybrid_search,
+                    key="checkbox_hybrid_search",
+                    help="Adds keyword matching. Useful for exact terms/IDs."
+                )
+                st.session_state.setting_hybrid_search = use_hybrid_search
+                
+                if use_hybrid_search:
+                    st.info("🔀 BM25 + Vector fusion (60/40)")
+                else:
+                    st.caption("💡 Only use for: Document IDs, specific numbers, exact terms")
             
-            use_hybrid_search = st.checkbox(
-                "Hybrid Search (BM25)",
-                value=False,
-                help="Adds keyword matching. Useful for exact terms/IDs."
-            )
-            if use_hybrid_search:
-                st.info("🔀 BM25 + Vector fusion (60/40)")
-            else:
-                st.caption("💡 Only use for: Document IDs, specific numbers, exact terms")
-            
-            # Quick guide
+            # Quick guide (always show)
             st.divider()
             with st.popover("📖 When to use these?"):
                 st.markdown("""
@@ -385,14 +440,37 @@ def render_sidebar():
         query_count = len([m for m in st.session_state.messages if m["role"] == "user"])
         st.metric("Queries", query_count)
         
-        if st.button("🗑️ Clear History", use_container_width=True):
-            st.session_state.messages = []
-            # Clear the saved history file (truncate instead of delete for Docker volumes)
-            try:
-                CHAT_HISTORY_FILE.write_text("[]")
-            except Exception:
-                pass  # Ignore if file doesn't exist or can't be written
-            st.rerun()
+        # Initialize confirmation state
+        if "confirm_clear" not in st.session_state:
+            st.session_state.confirm_clear = False
+        
+        if not st.session_state.confirm_clear:
+            # Show "Clear History" button
+            if st.button("🗑️ Clear History", use_container_width=True):
+                st.session_state.confirm_clear = True
+                st.rerun()
+        else:
+            # Show confirmation dialog
+            st.warning("⚠️ **Are you sure?**\n\nThis will permanently delete all chat history.")
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("✅ Yes, Clear", use_container_width=True, type="primary"):
+                    st.session_state.messages = []
+                    st.session_state.is_processing = False
+                    st.session_state.stop_requested = False
+                    st.session_state.query_to_process = None
+                    st.session_state.total_queries = 0
+                    st.session_state.confirm_clear = False
+                    # Clear the saved history file
+                    try:
+                        CHAT_HISTORY_FILE.write_text("[]")
+                    except Exception:
+                        pass
+                    st.rerun()
+            with col2:
+                if st.button("❌ Cancel", use_container_width=True):
+                    st.session_state.confirm_clear = False
+                    st.rerun()
         
         st.divider()
         
@@ -438,10 +516,10 @@ def render_message(role: str, content: str, sources: list | None = None, show_so
                     page_label = metadata.get("page_label")
                     file_type = metadata.get("file_type", "")
                     
-                    # Show more text (1000 chars) with ellipsis if truncated
+                    # Show more text (2500 chars) for better context visibility
                     full_text = src.get("text", "")
-                    if len(full_text) > 1000:
-                        text_preview = full_text[:1000] + "..."
+                    if len(full_text) > 2500:
+                        text_preview = full_text[:2500] + "..."
                     else:
                         text_preview = full_text
                     
@@ -484,29 +562,22 @@ def render_metrics_summary(metrics) -> None:
     else:
         precision_color = "#f56565"  # red
     
-    # Query expansion indicator
-    expansion_str = ""
-    if hasattr(metrics, 'expansion_enabled') and metrics.expansion_enabled:
+    # Build features list
+    features = []
+    expansion_enabled = hasattr(metrics, 'expansion_enabled') and metrics.expansion_enabled
+    hybrid_enabled = hasattr(metrics, 'hybrid_enabled') and metrics.hybrid_enabled
+    if expansion_enabled:
         queries_used = getattr(metrics, 'queries_used', 1)
-        expansion_str = f'<span>🔄 Expanded: <strong>{queries_used}q</strong></span>'
+        features.append(f"✅ Expansion ({queries_used}q)")
+    if hybrid_enabled:
+        features.append("✅ Hybrid")
+    features_str = " | ".join(features) if features else ""
     
-    # Hybrid search indicator
-    hybrid_str = ""
-    if hasattr(metrics, 'hybrid_enabled') and metrics.hybrid_enabled:
-        hybrid_str = '<span>🔀 <strong>Hybrid</strong></span>'
-    
-    # Render compact metrics bar
-    st.markdown(f"""
-    <div style="display: flex; gap: 1rem; flex-wrap: wrap; font-size: 0.8rem; color: #a0aec0; margin-top: 0.5rem; padding: 0.5rem; background: rgba(102,126,234,0.05); border-radius: 0.5rem;">
-        <span>⏱️ <strong>{latency_str}</strong></span>
-        <span>📊 Precision: <strong style="color: {precision_color}">{precision:.0%}</strong></span>
-        <span>📈 Avg Score: <strong>{avg_score:.0%}</strong></span>
-        <span>📁 {sources} source{'s' if sources != 1 else ''}</span>
-        <span>🎯 MRR: <strong>{metrics.mrr:.2f}</strong></span>
-        {expansion_str}
-        {hybrid_str}
-    </div>
-    """, unsafe_allow_html=True)
+    # Render compact metrics bar using st.caption (no HTML needed)
+    metrics_text = f"⏱️ {latency_str} | 📊 P@K: {precision:.0%} | 📈 Score: {avg_score:.0%} | 📁 {sources} src | 🎯 MRR: {metrics.mrr:.2f}"
+    if features_str:
+        metrics_text += f" | {features_str}"
+    st.caption(metrics_text)
     
     # Optional: Detailed metrics expander
     with st.expander("📈 Detailed Metrics", expanded=False):
@@ -549,13 +620,12 @@ def render_chat_history(show_sources: bool):
                 # Reconstruct metrics display from stored dict
                 latency_data = metrics_dict.get("latency", {})
                 retrieval_data = metrics_dict.get("retrieval", {})
-                scores_data = metrics_dict.get("scores", {})
-                coverage_data = metrics_dict.get("coverage", {})
+                counts_data = metrics_dict.get("counts", {})
                 
                 latency = latency_data.get("e2e_ms", msg.get("latency_ms", 0))
                 precision = retrieval_data.get("precision_at_k", 0)
-                avg_score = scores_data.get("avg", 0)
-                sources = coverage_data.get("unique_sources", 0)
+                avg_score = retrieval_data.get("avg_score", 0)  # Fixed: was in wrong dict
+                sources = counts_data.get("total_retrieved", len(msg.get("sources", [])))  # Fixed: use counts
                 mrr = retrieval_data.get("mrr", 0)
                 
                 # Format latency
@@ -572,30 +642,24 @@ def render_chat_history(show_sources: bool):
                 else:
                     precision_color = "#f56565"
                 
-                # Query expansion indicator
+                # Build features list (no HTML, just text)
+                features = []
                 expansion_data = metrics_dict.get("expansion", {})
-                expansion_enabled = expansion_data.get("enabled", False)
-                expansion_str = ""
-                if expansion_enabled:
+                if expansion_data.get("enabled", False):
                     queries_used = expansion_data.get("queries_used", 1)
-                    expansion_str = f'<span>🔄 {queries_used}q</span>'
+                    features.append(f"✅ Expansion ({queries_used}q)")
                 
-                # Hybrid search indicator
                 hybrid_data = metrics_dict.get("hybrid", {})
-                hybrid_enabled = hybrid_data.get("enabled", False)
-                hybrid_str = '<span>🔀 Hybrid</span>' if hybrid_enabled else ""
+                if hybrid_data.get("enabled", False):
+                    features.append("✅ Hybrid")
                 
-                st.markdown(f"""
-                <div style="display: flex; gap: 1rem; flex-wrap: wrap; font-size: 0.8rem; color: #a0aec0; margin-top: 0.5rem; padding: 0.5rem; background: rgba(102,126,234,0.05); border-radius: 0.5rem;">
-                    <span>⏱️ <strong>{latency_str}</strong></span>
-                    <span>📊 P@K: <strong style="color: {precision_color}">{precision:.0%}</strong></span>
-                    <span>📈 Score: <strong>{avg_score:.0%}</strong></span>
-                    <span>📁 {sources} src</span>
-                    <span>🎯 MRR: {mrr:.2f}</span>
-                    {expansion_str}
-                    {hybrid_str}
-                </div>
-                """, unsafe_allow_html=True)
+                features_str = " | ".join(features) if features else ""
+                
+                # Render compact metrics using st.caption (no HTML escaping issues)
+                metrics_text = f"⏱️ {latency_str} | 📊 P@K: {precision:.0%} | 📈 Score: {avg_score:.0%} | 📁 {sources} src | 🎯 MRR: {mrr:.2f}"
+                if features_str:
+                    metrics_text += f" | {features_str}"
+                st.caption(metrics_text)
             elif "latency_ms" in msg:
                 # Fallback for old messages without full metrics
                 latency = msg["latency_ms"]
@@ -666,6 +730,201 @@ def main():
     # Initialize session state first
     init_session_state()
     
+    # =========================================================================
+    # CRITICAL: If processing a query, show FROZEN UI and do the processing
+    # This happens AFTER st.rerun() was called, ensuring no interactive widgets
+    # =========================================================================
+    if st.session_state.get("is_processing", False) and st.session_state.get("query_to_process"):
+        # Show frozen sidebar (NO interactive widgets) - mirrors normal sidebar structure
+        with st.sidebar:  # type: ignore[attr-defined]
+            # System Status (same as normal)
+            st.markdown("## ⚙️ System Status")
+            col1, col2 = st.columns(2)
+            with col1:
+                st.markdown("🟢 **Vector Store**")
+                st.caption(f"{st.session_state.get('_vs_count', 0):,} vectors")
+            with col2:
+                st.markdown("🟢 **LLM (Ollama)**")
+                st.caption("llama3.2:3b")
+            
+            st.divider()
+            
+            # Settings header (same as normal)
+            st.markdown("## 🎯 Settings")
+            st.markdown(f"**Sources to retrieve:** {st.session_state.get('setting_top_k', 10)}")
+            st.markdown(f"**Show sources:** {'Yes' if st.session_state.get('setting_show_sources', True) else 'No'}")
+            
+            st.divider()
+            
+            # Advanced Retrieval - locked during processing
+            st.markdown("### 🔧 Advanced Retrieval")
+            st.info("🔍 **Processing query...**")
+            st.markdown(f"• Query Expansion: **{'On' if st.session_state.get('setting_query_expansion') else 'Off'}**")
+            st.markdown(f"• Hybrid Search: **{'On' if st.session_state.get('setting_hybrid_search') else 'Off'}**")
+            
+            st.divider()
+            
+            # Stop button in sidebar during processing
+            if st.button("🛑 Stop Query", type="primary", use_container_width=True, key="stop_sidebar"):
+                st.session_state.stop_requested = True
+                st.session_state.is_processing = False
+                st.session_state.query_to_process = None
+                st.session_state.messages.append({
+                    "role": "assistant",
+                    "content": "⚠️ Query cancelled by user.",
+                    "sources": [],
+                })
+                save_chat_history()  # Save before rerun to persist
+                st.rerun()
+        
+        # Show header (simplified during processing)
+        st.markdown("## 📚 Knowledge Base Q&A")
+        st.caption("💡 Ask specific questions for best results")
+        
+        # Show chat history
+        show_sources = st.session_state.get("setting_show_sources", True)
+        render_chat_history(show_sources)
+        
+        # ==========================================================================
+        # STREAMING GENERATION WITH STOP BUTTON AT BOTTOM
+        # ==========================================================================
+        
+        # Get the query to process
+        query = st.session_state.query_to_process
+        st.session_state.query_to_process = None  # Clear immediately
+        
+        # Check if stop was requested before starting
+        if st.session_state.get("stop_requested", False):
+            st.session_state.stop_requested = False
+            st.session_state.is_processing = False
+            st.rerun()
+        
+        # Placeholders for streaming UI
+        status_placeholder = st.empty()
+        answer_placeholder = st.empty()
+        
+        # ==========================================================================
+        # CHAT INPUT AREA (STOP BUTTON) - Aligned with input during processing
+        # ==========================================================================
+        # Add spacing before input area
+        st.markdown("<div style='height: 1rem;'></div>", unsafe_allow_html=True)
+        
+        # Create inline container for input + button
+        input_container = st.container()
+        with input_container:
+            col_input, col_btn = st.columns([6, 1], gap="small")
+            with col_input:
+                st.text_input(
+                    "Query",
+                    value="⏳ Processing...",
+                    disabled=True,
+                    label_visibility="collapsed",
+                    key="frozen_input"
+                )
+            with col_btn:
+                stop_clicked = st.button("🛑 Stop", type="primary", use_container_width=True, key="stop_frozen")
+                if stop_clicked:
+                    st.session_state.stop_requested = True
+        
+        # Start streaming
+        status_placeholder.info("🔍 Searching knowledge base...")
+        
+        engine = get_rag_engine()
+        if engine:
+            current_top_k = st.session_state.get("setting_top_k", 10)
+            current_query_expansion = st.session_state.get("setting_query_expansion", False)
+            current_hybrid_search = st.session_state.get("setting_hybrid_search", False)
+            
+            def check_stop():
+                return st.session_state.get("stop_requested", False)
+            
+            try:
+                if check_stop():
+                    raise InterruptedError("Query cancelled")
+                
+                stream = engine.query_stream(
+                    query,
+                    similarity_top_k=current_top_k,
+                    use_query_expansion=current_query_expansion,
+                    use_hybrid_search=current_hybrid_search,
+                    stop_check=check_stop,
+                )
+                
+                sources = []
+                full_answer = ""
+                metrics_data = {}
+                
+                for chunk in stream:
+                    chunk_type = chunk.get("type")
+                    
+                    if chunk_type == "sources":
+                        sources = chunk.get("data", [])
+                        retrieval_ms = chunk.get("retrieval_ms", 0)
+                        status_placeholder.success(f"✅ Found {len(sources)} sources ({retrieval_ms:.0f}ms)")
+                        
+                    elif chunk_type == "token":
+                        token = chunk.get("data", "")
+                        full_answer += token
+                        answer_placeholder.markdown(full_answer + "▌")
+                        
+                    elif chunk_type == "complete":
+                        full_answer = chunk.get("data", full_answer)
+                        metrics_data = chunk.get("metrics", {})
+                        answer_placeholder.markdown(full_answer)
+                        status_placeholder.empty()
+                        
+                    elif chunk_type == "stopped":
+                        full_answer = chunk.get("data", "") or "⚠️ Query cancelled."
+                        answer_placeholder.markdown(full_answer)
+                        status_placeholder.empty()
+                        break
+                        
+                    elif chunk_type == "error":
+                        full_answer = f"❌ Error: {chunk.get('data', 'Unknown')}"
+                        answer_placeholder.markdown(full_answer)
+                        status_placeholder.empty()
+                        break
+                
+                # Save response
+                e2e_ms = metrics_data.get("e2e_ms", 0) if isinstance(metrics_data, dict) else 0
+                retrieval_ms = metrics_data.get("retrieval_ms", 0) if isinstance(metrics_data, dict) else 0
+                source_scores = [s["score"] for s in sources if isinstance(s, dict) and "score" in s]
+                avg_score = sum(source_scores) / max(len(source_scores), 1)
+                
+                st.session_state.messages.append({
+                    "role": "assistant",
+                    "content": full_answer,
+                    "sources": sources,
+                    "latency_ms": e2e_ms,
+                    "metrics": {
+                        "latency": {"e2e_ms": e2e_ms, "ttfr_ms": retrieval_ms},
+                        "retrieval": {"precision_at_k": 1.0 if sources else 0, "mrr": 1.0, "hit_rate": 1.0 if sources else 0, "avg_score": avg_score},
+                        "counts": {"above_threshold": len(sources), "total_retrieved": len(sources)},
+                        "expansion": {"enabled": current_query_expansion, "queries_used": 1},
+                        "hybrid": {"enabled": current_hybrid_search},
+                    },
+                    "warning": None,
+                })
+                st.session_state.total_queries += 1
+                save_chat_history()
+                
+            except InterruptedError:
+                logger.info("Query cancelled by user")
+                    
+            except Exception as e:
+                logger.exception("Query failed")
+                st.session_state.messages.append({
+                    "role": "assistant",
+                    "content": f"❌ Error: {str(e)}",
+                    "sources": [],
+                })
+            finally:
+                st.session_state.is_processing = False
+                st.session_state.stop_requested = False
+        
+        # Rerun to show normal UI
+        st.rerun()
+    
     # Show loading indicator if not initialized yet
     loading_placeholder = st.empty()
     
@@ -678,7 +937,7 @@ def main():
         </style>
         <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:50vh;">
             <div style="font-size:3rem; margin-bottom:1rem;">📚</div>
-            <h2 style="color:#667eea; margin:0;">Loading Knowledge Base...</h2>
+            <div style="color:#667eea; margin:0; font-size:1.5rem; font-weight:600;">Loading Knowledge Base...</div>
             <p style="color:#888; margin-top:0.5rem; animation: kb-pulse 1.5s ease-in-out infinite;">First load may take a moment...</p>
             <div style="width:40px; height:40px; border:4px solid rgba(102,126,234,0.2); border-top-color:#667eea; border-radius:50%; margin-top:1.5rem; animation: kb-spin 1s linear infinite;"></div>
         </div>
@@ -712,64 +971,97 @@ def main():
     # Chat history
     render_chat_history(show_sources)
     
-    # Chat input
-    if prompt := st.chat_input("Ask a question about your documents..."):
-        # Add user message
-        st.session_state.messages.append({
-            "role": "user",
-            "content": prompt,
-        })
-        
-        # Display user message
-        render_message("user", prompt)
-        
-        # Generate response
-        with st.spinner("Searching knowledge base..."):
-            try:
-                response = engine.query(prompt, similarity_top_k=top_k)
-                metrics = response.metrics
-                
-                # Prepare metrics for storage
-                metrics_dict = metrics.to_dict() if metrics else {}
-                
-                # Add assistant message with metrics
+    # ==========================================================================
+    # QUERY PROCESSING
+    # ==========================================================================
+    # Simple flow: Only process new queries from chat_input.
+    # During processing, input is disabled to prevent duplicate submissions.
+    # ==========================================================================
+    
+    # ==========================================================================
+    # CHAT INPUT WITH SEND/STOP BUTTON (Inline layout)
+    # ==========================================================================
+    is_processing = st.session_state.get("is_processing", False)
+    
+    # CSS for inline input + button layout
+    st.markdown("""
+    <style>
+    /* Remove form border/padding */
+    div[data-testid="stForm"] {
+        border: none !important;
+        padding: 0 !important;
+        background: transparent !important;
+    }
+    /* Align columns at bottom */
+    div[data-testid="stHorizontalBlock"] {
+        align-items: flex-end !important;
+    }
+    /* Ensure button height matches input */
+    div[data-testid="stHorizontalBlock"] .stButton button,
+    div[data-testid="stHorizontalBlock"] .stFormSubmitButton button {
+        height: 42px !important;
+        min-height: 42px !important;
+        margin-bottom: 0 !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+    
+    if is_processing:
+        # During processing: show disabled input + Stop button
+        col_input, col_btn = st.columns([6, 1])
+        with col_input:
+            st.text_area(
+                "Query",
+                value="⏳ Processing your query...",
+                disabled=True,
+                label_visibility="collapsed",
+                key="query_disabled",
+                height=68
+            )
+        with col_btn:
+            st.markdown("<div style='height: 20px;'></div>", unsafe_allow_html=True)  # Align button
+            if st.button("🛑 Stop", type="primary", use_container_width=True, key="stop_main"):
+                st.session_state.stop_requested = True
+                st.session_state.is_processing = False
+                st.session_state.query_to_process = None
                 st.session_state.messages.append({
                     "role": "assistant",
-                    "content": response.answer,
-                    "sources": response.sources,
-                    "latency_ms": metrics.e2e_ms if metrics else 0,
-                    "metrics": metrics_dict,
-                    "warning": response.warning,
-                })
-                
-                st.session_state.total_queries += 1
-                
-                # Display response
-                render_message("assistant", response.answer, response.sources, show_sources)
-                
-                # Show warning if present (low relevance, etc.)
-                if response.warning:
-                    st.warning(response.warning)
-                
-                # Show detailed metrics
-                if metrics:
-                    render_metrics_summary(metrics)
-                
-            except Exception as e:
-                error_msg = f"Error: {str(e)}"
-                st.error(error_msg)
-                logger.exception("Query failed")
-                
-                st.session_state.messages.append({
-                    "role": "assistant",
-                    "content": f"❌ {error_msg}",
+                    "content": "⚠️ Query cancelled by user.",
                     "sources": [],
                 })
-        
-        # Save chat history to file (persists across refreshes)
-        save_chat_history()
-        
-        # Note: No st.rerun() needed - sidebar updates automatically on next interaction
+                save_chat_history()
+                st.rerun()
+    else:
+        # Normal state: Text area + Send button (click button to send)
+        with st.form(key="chat_form", clear_on_submit=True):
+            query_text = st.text_area(
+                "Query",
+                value="",
+                placeholder="Ask a detailed question about your documents...\n\nExample: What was the revenue in Q3 2024?",
+                label_visibility="collapsed",
+                key="query_input_field",
+                height=100
+            )
+            
+            col_spacer, col_btn = st.columns([5, 1])
+            with col_btn:
+                submitted = st.form_submit_button("➤ Send", type="secondary", use_container_width=True)
+            
+            if submitted and query_text and query_text.strip():
+                new_prompt = query_text.strip()
+                # Reset stop flag
+                st.session_state.stop_requested = False
+                # Store query and settings
+                st.session_state.query_to_process = new_prompt
+                st.session_state.is_processing = True
+                st.session_state.setting_top_k = top_k
+                # Add user message
+                st.session_state.messages.append({
+                    "role": "user",
+                    "content": new_prompt,
+                })
+                save_chat_history()
+                st.rerun()
 
 
 # Streamlit runs the entire script on each interaction

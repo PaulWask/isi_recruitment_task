@@ -6,10 +6,11 @@ Each component returns a string that can be rendered with st.markdown().
 Template files are located in: ui/static/templates/
 """
 
+import html
+import re
 from functools import lru_cache
 from pathlib import Path
 from typing import Optional
-import html
 
 
 # =============================================================================
@@ -98,6 +99,13 @@ def render_source_card(
     else:
         path_section = ""
     
+    # Clean text preview: remove PDF line breaks to get flowing prose
+    # Replace multiple newlines/spaces with single space
+    cleaned_text = text_preview
+    cleaned_text = re.sub(r'\s*\n\s*', ' ', cleaned_text)  # Replace newlines with space
+    cleaned_text = re.sub(r'\s+', ' ', cleaned_text)  # Collapse multiple spaces
+    cleaned_text = cleaned_text.strip()
+    
     # Load and fill template
     template = _load_template("source_card.html")
     return template.format(
@@ -105,7 +113,7 @@ def render_source_card(
         score_class=score_class,
         location_str=location_str,
         file_name=escaped_filename,
-        text_preview=escape_html(text_preview),
+        text_preview=escape_html(cleaned_text),
         path_section=path_section,
     )
 

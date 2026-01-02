@@ -20,9 +20,10 @@ Why RAG over pure LLM:
 - Up-to-date: No need to retrain model for new documents
 
 Retrieval parameters:
-- similarity_top_k=6: Retrieve 6 most relevant chunks
-- This provides ~6K tokens of context (6 × 1024)
-- Balances context richness vs. noise
+- similarity_top_k=10: Retrieve 10 most relevant chunks
+- With small chunks (256 tokens): ~2.5K tokens of context
+- With default chunks (1024 tokens): ~10K tokens of context
+- Optimized for financial tables with smaller, focused chunks
 
 Metrics tracked:
 - Latency: TTFR (retrieval), TTFG (generation), E2E (total)
@@ -31,9 +32,10 @@ Metrics tracked:
 """
 
 import logging
+import re
 import time
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Callable, Generator, Iterator, Literal, Optional, TypedDict, Union
 
 from llama_index.core import VectorStoreIndex
 from llama_index.core.llms import LLM
@@ -49,6 +51,52 @@ from knowledge_base_rag.storage.embeddings import get_embed_model
 from knowledge_base_rag.storage.vector_store import VectorStoreManager
 
 logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# Streaming Response Types
+# =============================================================================
+
+class StreamChunkSources(TypedDict):
+    """Chunk yielded when sources are retrieved."""
+    type: Literal["sources"]
+    data: list[dict]
+    retrieval_ms: float
+
+
+class StreamChunkToken(TypedDict):
+    """Chunk yielded for each token during generation."""
+    type: Literal["token"]
+    data: str
+
+
+class StreamChunkComplete(TypedDict):
+    """Chunk yielded when generation is complete."""
+    type: Literal["complete"]
+    data: str
+    metrics: dict
+
+
+class StreamChunkStopped(TypedDict):
+    """Chunk yielded when streaming is stopped by user."""
+    type: Literal["stopped"]
+    data: str
+
+
+class StreamChunkError(TypedDict):
+    """Chunk yielded when an error occurs."""
+    type: Literal["error"]
+    data: str
+
+
+# Union of all possible streaming chunks
+StreamChunk = Union[
+    StreamChunkSources,
+    StreamChunkToken,
+    StreamChunkComplete,
+    StreamChunkStopped,
+    StreamChunkError,
+]
 
 
 # =============================================================================
@@ -239,7 +287,7 @@ class RAGEngine:
         embed_model: Optional[BaseEmbedding] = None,
         similarity_top_k: Optional[int] = None,
         enable_reranking: bool = True,  # ON by default - always improves quality
-        rerank_top_k: int = 20,
+        rerank_top_k: int = 40,  # Increased from 20 for better recall with tabular data
         enable_query_expansion: bool = False,
         enable_hybrid_search: bool = False,
     ):
@@ -369,18 +417,14 @@ class RAGEngine:
         if self._bm25_index is None and self.enable_hybrid_search:
             try:
                 from knowledge_base_rag.engine.retrieval import BM25Index
-                # Get all documents from the index
-                docstore = self.index.docstore
-                documents = []
-                doc_ids = []
-                for doc_id, node in docstore.docs.items():
-                    # Get text content from node (handle both TextNode and BaseNode)
-                    text = getattr(node, 'text', None) or getattr(node, 'get_content', lambda: '')()
-                    if text:
-                        documents.append(text)
-                        doc_ids.append(doc_id)
                 
-                if documents:
+                # Fetch documents directly from Qdrant (docstore is empty with Qdrant)
+                doc_data = self.vector_store_manager.get_all_documents()
+                
+                if doc_data:
+                    doc_ids = [doc_id for doc_id, _ in doc_data]
+                    documents = [text for _, text in doc_data]
+                    
                     self._bm25_index = BM25Index(documents)
                     self._bm25_doc_ids = doc_ids  # Map index position to node_id
                     
@@ -389,9 +433,9 @@ class RAGEngine:
                     _bm25_cache["doc_ids"] = self._bm25_doc_ids
                     _bm25_cache["doc_count"] = len(documents)
                     
-                    logger.info(f"BM25 index built with {len(documents)} documents")
+                    logger.info(f"BM25 index built with {len(documents)} documents from Qdrant")
                 else:
-                    logger.warning("No documents found for BM25 index")
+                    logger.warning("No documents found in Qdrant for BM25 index")
                     self.enable_hybrid_search = False
             except ImportError:
                 logger.warning("rank-bm25 not installed. Run: uv add rank-bm25")
@@ -653,6 +697,40 @@ class RAGEngine:
         generation_time = (time.perf_counter() - generation_start) * 1000
         logger.info(f"Answer generated in {generation_time:.0f}ms")
         
+        # Post-process response: Clean up and format
+        answer_text = str(response)
+        
+        # Remove raw metadata patterns that LLM might include
+        # Pattern: "page_label: X, file_name: Y" or similar
+        answer_text = re.sub(
+            r'\s*(?:in\s+)?page_label:\s*\d+,?\s*file_name:\s*[\w\-\.]+\.pdf\.?',
+            '', answer_text, flags=re.IGNORECASE
+        )
+        # Pattern: "stated in page_label: X..."
+        answer_text = re.sub(
+            r'\s*(?:is\s+)?(?:stated|found|mentioned|described)\s+in\s+page_label:\s*\d+.*?\.pdf\.?',
+            '', answer_text, flags=re.IGNORECASE
+        )
+        # Pattern: "According to this source:" or similar intro lines
+        answer_text = re.sub(
+            r'According to (?:this|the) source:?\s*\n?',
+            '', answer_text, flags=re.IGNORECASE
+        )
+        # Pattern: raw file names like "9b080c05-2689-4d30-a2f1-53f4d9c6640c.pdf"
+        answer_text = re.sub(
+            r'\s*[\w\-]{8,}\.pdf\.?',
+            '', answer_text
+        )
+        # Clean up multiple newlines from removals
+        answer_text = re.sub(r'\n{3,}', '\n\n', answer_text)
+        # Clean up leading/trailing whitespace
+        answer_text = answer_text.strip()
+        
+        # Add two line breaks before "Source:" citations for readability
+        answer_text = re.sub(r'\n?(Source:)', r'\n\n\1', answer_text)
+        # Also handle inline source citations without newline
+        answer_text = re.sub(r'([.!?])\s*(Source:)', r'\1\n\n\2', answer_text)
+        
         # End-to-end time
         e2e_time = (time.perf_counter() - start_time) * 1000  # ms
         
@@ -675,7 +753,7 @@ class RAGEngine:
         
         # Build response
         rag_response = RAGResponse(
-            answer=str(response),
+            answer=answer_text,
             sources=sources,
             query=question,
             confidence=confidence,
@@ -693,6 +771,212 @@ class RAGEngine:
         )
         
         return rag_response
+    
+    def query_stream(
+        self,
+        question: str,
+        similarity_top_k: Optional[int] = None,
+        relevance_threshold: float = 0.4,
+        use_reranking: Optional[bool] = None,
+        use_query_expansion: Optional[bool] = None,
+        use_hybrid_search: Optional[bool] = None,
+        stop_check: Optional[Callable[[], bool]] = None,
+    ) -> Generator[dict, None, None]:
+        """Stream query response token by token.
+        
+        This is a generator that yields:
+        1. First yield: {"type": "sources", "data": sources_list} - Retrieved sources
+        2. Subsequent yields: {"type": "token", "data": token_text} - Each token
+        3. Final yield: {"type": "complete", "data": full_answer} - Complete answer
+        
+        Args:
+            question: User's question.
+            similarity_top_k: Number of chunks to retrieve.
+            relevance_threshold: Score threshold for relevant docs.
+            use_reranking: Override reranking setting.
+            use_query_expansion: Override query expansion setting.
+            use_hybrid_search: Override hybrid search setting.
+            stop_check: Callable that returns True if streaming should stop.
+            
+        Yields:
+            Dict with "type" and "data" keys.
+        """
+        logger.info(f"Streaming query: {question[:100]}...")
+        
+        # Determine which enhancements to use
+        should_rerank = use_reranking if use_reranking is not None else self.enable_reranking
+        should_expand = use_query_expansion if use_query_expansion is not None else self.enable_query_expansion
+        should_hybrid = use_hybrid_search if use_hybrid_search is not None else self.enable_hybrid_search
+        
+        # Query expansion
+        expanded_queries = [question]
+        if should_expand and self.query_expander:
+            expanded_queries = self.query_expander.expand_with_synonyms(question)
+        
+        start_time = time.perf_counter()
+        
+        # Check stop before retrieval
+        if stop_check and stop_check():
+            yield {"type": "stopped", "data": "Query cancelled"}
+            return
+        
+        # Get retrieval k
+        fetch_k = similarity_top_k or self.similarity_top_k
+        if should_rerank:
+            fetch_k = max(fetch_k, self.rerank_top_k)
+        
+        # Create query engine for retrieval
+        query_engine = self._create_query_engine(fetch_k)
+        
+        # Retrieve documents (non-streaming)
+        all_nodes = {}
+        
+        # BM25 hybrid search
+        if should_hybrid and self.bm25_index:
+            try:
+                bm25_hits = self.bm25_index.search(question, top_k=fetch_k)
+                for idx, bm25_score in bm25_hits:
+                    if hasattr(self, '_bm25_doc_ids') and idx < len(self._bm25_doc_ids):
+                        node_id = self._bm25_doc_ids[idx]
+                        all_nodes[node_id] = (None, bm25_score * 0.3, "bm25")
+            except Exception as e:
+                logger.warning(f"BM25 search failed: {e}")
+        
+        # Vector search
+        for q in expanded_queries:
+            if stop_check and stop_check():
+                yield {"type": "stopped", "data": "Query cancelled"}
+                return
+            try:
+                response = query_engine.query(q)
+                for node in response.source_nodes:
+                    node_id = node.node_id
+                    score = node.score or 0.5
+                    if node_id in all_nodes:
+                        if score > all_nodes[node_id][1]:
+                            all_nodes[node_id] = (node, score, "vector")
+                    else:
+                        all_nodes[node_id] = (node, score, "vector")
+            except Exception as e:
+                logger.warning(f"Query failed: {e}")
+        
+        retrieval_time = (time.perf_counter() - start_time) * 1000
+        
+        # Build sources from retrieved nodes
+        nodes_with_scores = [(n, s) for n, s, _ in all_nodes.values() if n is not None]
+        nodes_with_scores.sort(key=lambda x: x[1], reverse=True)
+        
+        # Rerank if enabled
+        if should_rerank and self.reranker and nodes_with_scores:
+            try:
+                from knowledge_base_rag.engine.retrieval import RetrievalResult
+                candidates = [
+                    RetrievalResult(
+                        text=n.get_text(),
+                        score=s,
+                        metadata=n.metadata,
+                        node_id=n.node_id
+                    )
+                    for n, s in nodes_with_scores
+                ]
+                final_k = similarity_top_k or self.similarity_top_k
+                reranked = self.reranker.rerank(question, candidates, top_k=final_k)
+                nodes_with_scores = [(n, r.rerank_score) for r in reranked 
+                                     for n, _ in nodes_with_scores if n.node_id == r.node_id][:final_k]
+            except Exception as e:
+                logger.warning(f"Reranking failed: {e}")
+        
+        # Build sources list
+        sources = []
+        for node, score in nodes_with_scores[:self.similarity_top_k]:
+            meta = node.metadata
+            sources.append({
+                "source": meta.get("file_name", meta.get("source", "Unknown")),
+                "score": score,
+                "text": node.get_text(),
+                "metadata": meta,
+            })
+        
+        # Yield sources first
+        yield {"type": "sources", "data": sources, "retrieval_ms": retrieval_time}
+        
+        if not sources:
+            yield {"type": "complete", "data": "No relevant documents found."}
+            return
+        
+        # Check stop before generation
+        if stop_check and stop_check():
+            yield {"type": "stopped", "data": "Query cancelled"}
+            return
+        
+        # Build context for LLM
+        context_str = "\n\n---\n\n".join([s["text"] for s in sources])
+        
+        # Create prompt
+        prompt = self._get_qa_prompt().format(
+            context_str=context_str,
+            query_str=question
+        )
+        
+        # Stream LLM response
+        generation_start = time.perf_counter()
+        full_response = ""
+        
+        try:
+            # Use LLM's streaming capability
+            response_gen = self.llm.stream_complete(prompt)
+            
+            for chunk in response_gen:
+                if stop_check and stop_check():
+                    yield {"type": "stopped", "data": full_response}
+                    return
+                
+                token = chunk.delta
+                if token:
+                    full_response += token
+                    yield {"type": "token", "data": token}
+            
+            # Post-process final response
+            answer_text = self._clean_response(full_response)
+            
+            generation_time = (time.perf_counter() - generation_start) * 1000
+            e2e_time = (time.perf_counter() - start_time) * 1000
+            
+            yield {
+                "type": "complete",
+                "data": answer_text,
+                "metrics": {
+                    "retrieval_ms": retrieval_time,
+                    "generation_ms": generation_time,
+                    "e2e_ms": e2e_time,
+                    "sources_count": len(sources),
+                }
+            }
+            
+        except Exception as e:
+            logger.exception(f"Streaming generation failed: {e}")
+            yield {"type": "error", "data": str(e)}
+    
+    def _clean_response(self, response: str) -> str:
+        """Clean up LLM response by removing metadata patterns."""
+        import re
+        answer_text = response
+        # Remove raw metadata patterns
+        answer_text = re.sub(
+            r'\s*(?:in\s+)?page_label:\s*\d+,?\s*file_name:\s*[\w\-\.]+\.pdf\.?',
+            '', answer_text, flags=re.IGNORECASE
+        )
+        answer_text = re.sub(
+            r'\s*(?:is\s+)?(?:stated|found|mentioned|described)\s+in\s+page_label:\s*\d+.*?\.pdf\.?',
+            '', answer_text, flags=re.IGNORECASE
+        )
+        answer_text = re.sub(
+            r'According to (?:this|the) source:?\s*\n?',
+            '', answer_text, flags=re.IGNORECASE
+        )
+        answer_text = re.sub(r'\s*[\w\-]{8,}\.pdf\.?', '', answer_text)
+        answer_text = re.sub(r'\n{3,}', '\n\n', answer_text)
+        return answer_text.strip()
     
     def _get_qa_prompt(self) -> PromptTemplate:
         """Get the QA prompt template for answer generation."""
@@ -719,12 +1003,19 @@ CRITICAL RULES:
 8. When multiple sources exist, synthesize them coherently
 9. For numerical data, maintain precision (don't round unless the source does)
 10. Identify the source institution when mentioned (e.g., "According to the Central Bank...")
+11. For TABLE DATA: Match the EXACT row label from the question to find the correct value. Don't confuse subtotals with specific line items.
+12. PAY CLOSE ATTENTION to footnotes (marked with *) that may specify conditions
+13. For FINANCIAL STATEMENTS: Look for the specific line item (e.g., "Bank balances with Bank Saudi Fransi") and find the value in the correct column (date/period). Don't report aggregate totals or values from different rows.
+14. COLUMN MATCHING: When a question specifies a date (e.g., "30 June 2024"), find the column with that exact date header and extract the value from that column only.
 
 RESPONSE FORMAT:
 - Lead with the direct answer to the question
 - Support with specific data from the sources
 - Note any caveats, time periods, or methodology if mentioned
 - Keep response focused and professional
+- DO NOT include file names, page_label, or raw metadata in your answer
+- DO NOT cite sources inline (e.g., avoid "According to file xyz.pdf...")
+- Sources will be displayed separately in the UI - just provide the answer
 
 Context from knowledge base:
 ---------------------
@@ -733,7 +1024,7 @@ Context from knowledge base:
 
 Question: {query_str}
 
-Answer: """
+Answer (provide the answer directly without source citations): """
         )
     
     def _generate_warning(self, metrics: RAGMetrics, scores: list[float]) -> Optional[str]:

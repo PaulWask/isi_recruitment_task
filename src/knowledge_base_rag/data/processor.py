@@ -2,14 +2,14 @@
 
 Design decisions:
 - Use SentenceSplitter for semantic-aware chunking
-- Chunk size of 1024 tokens balances context preservation with retrieval precision
-- 128 token overlap prevents losing context at chunk boundaries
+- All chunking settings are centralized in config.py (Single Source of Truth)
 - Preserve all metadata through chunking for source attribution
 
 Chunking Strategies Available:
 1. SENTENCE (default): SentenceSplitter - respects sentences + enforces size limits
 2. SEMANTIC: Groups semantically similar sentences (slower, more accurate)
-3. HIERARCHICAL: Parent-child chunks for context preservation
+3. SMALL: Smaller chunks for precise retrieval (recommended for financial tables)
+4. LARGE: Larger chunks for more context
 
 Why SentenceSplitter (SENTENCE) is default:
 1. Fixed-size: Breaks mid-sentence, loses semantic meaning
@@ -17,49 +17,20 @@ Why SentenceSplitter (SENTENCE) is default:
 3. SentenceSplitter: Best of both - respects sentences + enforces size limits
 4. Semantic chunking: More accurate but slower (requires embeddings)
 
-Chunk size rationale (1024 tokens):
-- Large enough to contain full ideas/paragraphs
-- Small enough for precise retrieval (not returning irrelevant content)
-- Fits well in LLM context with multiple chunks (6 chunks × 1024 = 6K tokens)
-
-Overlap rationale (128 tokens):
-- ~12% overlap catches context that spans chunk boundaries
-- Not too large (would waste storage and slow retrieval)
-
-For 750MB of PDFs, recommended settings:
-- SENTENCE chunking (fast, good quality)
-- chunk_size=512 (smaller chunks = more precise retrieval)
-- chunk_overlap=50 (less overlap = faster indexing)
-- Consider SEMANTIC chunking if retrieval quality is more important than speed
+All chunk sizes are configurable via .env file or environment variables.
+See config.py for the single source of truth for all settings.
 """
 
 import logging
-from enum import Enum
 from typing import Optional, Literal
 
 from llama_index.core import Document
 from llama_index.core.node_parser import SentenceSplitter
 
-from knowledge_base_rag.core.config import settings
+# Import from centralized config (Single Source of Truth)
+from knowledge_base_rag.core.config import settings, ChunkingStrategy
 
 logger = logging.getLogger(__name__)
-
-
-class ChunkingStrategy(str, Enum):
-    """Available chunking strategies."""
-    SENTENCE = "sentence"      # Fast, sentence-aware (default)
-    SEMANTIC = "semantic"      # Slower, groups by semantic similarity
-    SMALL = "small"            # Smaller chunks for precise retrieval
-    LARGE = "large"            # Larger chunks for more context
-
-
-# Preset configurations for different strategies
-CHUNKING_PRESETS = {
-    ChunkingStrategy.SENTENCE: {"chunk_size": 1024, "chunk_overlap": 128},
-    ChunkingStrategy.SEMANTIC: {"chunk_size": 512, "chunk_overlap": 50},
-    ChunkingStrategy.SMALL: {"chunk_size": 256, "chunk_overlap": 32},
-    ChunkingStrategy.LARGE: {"chunk_size": 2048, "chunk_overlap": 256},
-}
 
 
 class DocumentProcessor:
@@ -67,15 +38,18 @@ class DocumentProcessor:
 
     Uses semantic-aware chunking that respects sentence boundaries
     while enforcing size limits for optimal retrieval performance.
+    
+    All chunking settings are loaded from config.py (Single Source of Truth).
+    Settings can be overridden via .env file or environment variables.
 
     Example:
-        # Default sentence-aware chunking
+        # Default strategy from config (settings.default_chunking_strategy)
         processor = DocumentProcessor()
         
-        # Small chunks for precise retrieval (recommended for 750MB+ datasets)
+        # Small chunks for precise retrieval (recommended for financial tables)
         processor = DocumentProcessor(strategy="small")
         
-        # Custom sizes
+        # Custom sizes (overrides strategy preset)
         processor = DocumentProcessor(chunk_size=512, chunk_overlap=50)
     """
 
@@ -83,29 +57,29 @@ class DocumentProcessor:
         self,
         chunk_size: Optional[int] = None,
         chunk_overlap: Optional[int] = None,
-        strategy: Literal["sentence", "semantic", "small", "large"] = "sentence",
+        strategy: Literal["sentence", "semantic", "small", "large"] | None = None,
     ):
         """Initialize the document processor.
 
         Args:
             chunk_size: Target size per chunk in tokens. Overrides strategy preset.
             chunk_overlap: Overlap between chunks in tokens. Overrides strategy preset.
-            strategy: Chunking strategy preset. Options:
-                - "sentence": Default, 1024 tokens, sentence-aware
-                - "semantic": 512 tokens, for semantic grouping
-                - "small": 256 tokens, precise retrieval for large datasets
-                - "large": 2048 tokens, more context per chunk
+            strategy: Chunking strategy preset. If None, uses settings.default_chunking_strategy.
+                Options:
+                - "sentence": General text (chunk_size from CHUNK_SIZE_SENTENCE env var)
+                - "semantic": Semantic grouping (chunk_size from CHUNK_SIZE_SEMANTIC env var)
+                - "small": Financial tables (chunk_size from CHUNK_SIZE_SMALL env var)
+                - "large": Dense context (chunk_size from CHUNK_SIZE_LARGE env var)
         """
-        # Get preset values
-        preset = CHUNKING_PRESETS.get(
-            ChunkingStrategy(strategy), 
-            CHUNKING_PRESETS[ChunkingStrategy.SENTENCE]
-        )
+        # Use default strategy from config if not specified
+        self.strategy = strategy or settings.default_chunking_strategy
         
-        # Allow overrides
-        self.chunk_size = chunk_size or preset["chunk_size"]
-        self.chunk_overlap = chunk_overlap or preset["chunk_overlap"]
-        self.strategy = strategy
+        # Get preset values from centralized config (Single Source of Truth)
+        preset = settings.get_chunking_preset(self.strategy)
+        
+        # Allow explicit overrides (for programmatic use)
+        self.chunk_size = chunk_size if chunk_size is not None else preset["chunk_size"]
+        self.chunk_overlap = chunk_overlap if chunk_overlap is not None else preset["chunk_overlap"]
 
         # SentenceSplitter respects sentence boundaries when possible
         # Falls back to character splitting only when necessary
@@ -118,7 +92,7 @@ class DocumentProcessor:
         )
 
         logger.info(
-            f"DocumentProcessor initialized: strategy={strategy}, "
+            f"DocumentProcessor initialized: strategy={self.strategy}, "
             f"chunk_size={self.chunk_size}, overlap={self.chunk_overlap}"
         )
 

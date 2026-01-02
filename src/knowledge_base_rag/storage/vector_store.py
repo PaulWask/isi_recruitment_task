@@ -203,6 +203,55 @@ class VectorStoreManager:
             logger.error(f"Error getting collection info: {e}")
             return None
 
+    def get_all_documents(self, limit: int = 10000) -> list[tuple[str, str]]:
+        """Fetch all documents from Qdrant for BM25 indexing.
+        
+        Args:
+            limit: Maximum number of documents to fetch.
+            
+        Returns:
+            List of (doc_id, text) tuples.
+        """
+        if not self.collection_exists():
+            return []
+        
+        try:
+            # Scroll through all points in the collection
+            documents = []
+            offset = None
+            batch_size = 100
+            
+            while True:
+                result = self.client.scroll(
+                    collection_name=self.collection_name,
+                    limit=batch_size,
+                    offset=offset,
+                    with_payload=True,
+                    with_vectors=False,  # We don't need vectors, just text
+                )
+                
+                points, next_offset = result
+                
+                for point in points:
+                    # Extract text from payload
+                    if point.payload:
+                        text = point.payload.get("text", "") or point.payload.get("_node_content", "")
+                        if text and isinstance(point.id, str):
+                            documents.append((point.id, text))
+                        elif text:
+                            documents.append((str(point.id), text))
+                
+                if next_offset is None or len(documents) >= limit:
+                    break
+                offset = next_offset
+            
+            logger.info(f"Fetched {len(documents)} documents from Qdrant for BM25")
+            return documents
+            
+        except Exception as e:
+            logger.error(f"Error fetching documents from Qdrant: {e}")
+            return []
+
     def delete_collection(self) -> bool:
         """Delete the collection if it exists.
 

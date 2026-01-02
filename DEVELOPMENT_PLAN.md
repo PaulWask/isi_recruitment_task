@@ -287,7 +287,7 @@ docker-compose up --build
 | `LLM_SERVICE` | `local` | `local` (Ollama) or `groq` |
 | `GROQ_API_KEY` | - | Required if using Groq |
 | `CHUNK_SIZE` | `1024` | Tokens per chunk |
-| `SIMILARITY_TOP_K` | `6` | Number of chunks to retrieve |
+| `SIMILARITY_TOP_K` | `10` | Number of chunks to retrieve (optimized for 256-token chunks) |
 
 ---
 
@@ -295,7 +295,7 @@ docker-compose up --build
 
 - **chunk_size=1024**: Balances context preservation with retrieval precision
 - **chunk_overlap=128**: Prevents losing context at chunk boundaries  
-- **similarity_top_k=6**: Enough context without overwhelming the LLM
+- **similarity_top_k=10**: Optimized for 256-token chunks (~2.5K tokens context)
 - **similarity_cutoff=0.7**: Filters out low-relevance noise
 
 ---
