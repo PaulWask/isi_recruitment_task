@@ -140,6 +140,29 @@ body {
     font-weight: 400;
 }
 
+.main-header .tip-box {
+    background: rgba(102, 126, 234, 0.08);
+    border: 1px solid rgba(102, 126, 234, 0.2);
+    border-radius: var(--radius-md);
+    padding: var(--space-sm) var(--space-md);
+    margin-top: var(--space-md);
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+    display: inline-block;
+}
+
+.main-header .tip-box strong {
+    color: var(--accent-primary);
+}
+
+.main-header .tip-box em {
+    color: var(--text-primary);
+    font-style: normal;
+    background: rgba(102, 126, 234, 0.1);
+    padding: 0.1rem 0.3rem;
+    border-radius: 3px;
+}
+
 /* ==========================================================================
    Chat Messages - Professional Dark Mode
    ========================================================================== */
@@ -652,16 +675,35 @@ details[open] summary {
     font-style: italic;
 }
 
-/* Text input styling */
+/* Text input styling - taller and more prominent */
 .stTextInput input {
     border-radius: var(--radius-md) !important;
     border: 1px solid var(--border-medium) !important;
-    padding: 0.75rem 1rem !important;
+    padding: 0.875rem 1rem !important;
+    min-height: 50px !important;
+    font-size: 1rem !important;
 }
 
 .stTextInput input:focus {
     border-color: var(--accent-primary) !important;
-    box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.2) !important;
+    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.15) !important;
+}
+
+/* Text area styling - expandable with scroll */
+.stTextArea textarea {
+    border-radius: var(--radius-md) !important;
+    border: 1px solid var(--border-medium) !important;
+    padding: 0.875rem 1rem !important;
+    min-height: 80px !important;
+    max-height: 200px !important;
+    font-size: 1rem !important;
+    resize: vertical !important;
+    overflow-y: auto !important;
+}
+
+.stTextArea textarea:focus {
+    border-color: var(--accent-primary) !important;
+    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.15) !important;
 }
 
 /* ==========================================================================

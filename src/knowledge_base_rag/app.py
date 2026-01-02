@@ -294,7 +294,7 @@ def get_rag_engine():
 
 def render_sidebar():
     """Render the sidebar with system status and settings."""
-    with st.sidebar:
+    with st.sidebar:  # type: ignore[attr-defined]
         st.markdown("## ⚙️ System Status")
         
         # Check services (using CACHED status - no repeated DB/HTTP calls)
@@ -440,18 +440,37 @@ def render_sidebar():
         query_count = len([m for m in st.session_state.messages if m["role"] == "user"])
         st.metric("Queries", query_count)
         
-        if st.button("🗑️ Clear History", use_container_width=True):
-            st.session_state.messages = []
-            st.session_state.is_processing = False
-            st.session_state.stop_requested = False
-            st.session_state.query_to_process = None
-            st.session_state.total_queries = 0
-            # Clear the saved history file (truncate instead of delete for Docker volumes)
-            try:
-                CHAT_HISTORY_FILE.write_text("[]")
-            except Exception:
-                pass  # Ignore if file doesn't exist or can't be written
-            st.rerun()
+        # Initialize confirmation state
+        if "confirm_clear" not in st.session_state:
+            st.session_state.confirm_clear = False
+        
+        if not st.session_state.confirm_clear:
+            # Show "Clear History" button
+            if st.button("🗑️ Clear History", use_container_width=True):
+                st.session_state.confirm_clear = True
+                st.rerun()
+        else:
+            # Show confirmation dialog
+            st.warning("⚠️ **Are you sure?**\n\nThis will permanently delete all chat history.")
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("✅ Yes, Clear", use_container_width=True, type="primary"):
+                    st.session_state.messages = []
+                    st.session_state.is_processing = False
+                    st.session_state.stop_requested = False
+                    st.session_state.query_to_process = None
+                    st.session_state.total_queries = 0
+                    st.session_state.confirm_clear = False
+                    # Clear the saved history file
+                    try:
+                        CHAT_HISTORY_FILE.write_text("[]")
+                    except Exception:
+                        pass
+                    st.rerun()
+            with col2:
+                if st.button("❌ Cancel", use_container_width=True):
+                    st.session_state.confirm_clear = False
+                    st.rerun()
         
         st.divider()
         
@@ -717,7 +736,7 @@ def main():
     # =========================================================================
     if st.session_state.get("is_processing", False) and st.session_state.get("query_to_process"):
         # Show frozen sidebar (NO interactive widgets) - mirrors normal sidebar structure
-        with st.sidebar:
+        with st.sidebar:  # type: ignore[attr-defined]
             # System Status (same as normal)
             st.markdown("## ⚙️ System Status")
             col1, col2 = st.columns(2)
@@ -758,8 +777,9 @@ def main():
                 save_chat_history()  # Save before rerun to persist
                 st.rerun()
         
-        # Show header
+        # Show header (simplified during processing)
         st.markdown("## 📚 Knowledge Base Q&A")
+        st.caption("💡 Ask specific questions for best results")
         
         # Show chat history
         show_sources = st.session_state.get("setting_show_sources", True)
@@ -990,14 +1010,16 @@ def main():
         # During processing: show disabled input + Stop button
         col_input, col_btn = st.columns([6, 1])
         with col_input:
-            st.text_input(
+            st.text_area(
                 "Query",
                 value="⏳ Processing your query...",
                 disabled=True,
                 label_visibility="collapsed",
-                key="query_disabled"
+                key="query_disabled",
+                height=68
             )
         with col_btn:
+            st.markdown("<div style='height: 20px;'></div>", unsafe_allow_html=True)  # Align button
             if st.button("🛑 Stop", type="primary", use_container_width=True, key="stop_main"):
                 st.session_state.stop_requested = True
                 st.session_state.is_processing = False
@@ -1010,17 +1032,18 @@ def main():
                 save_chat_history()
                 st.rerun()
     else:
-        # Normal state: Form with columns for input + Send button (Enter key works!)
+        # Normal state: Text area + Send button (click button to send)
         with st.form(key="chat_form", clear_on_submit=True):
-            col_input, col_btn = st.columns([6, 1])
-            with col_input:
-                query_text = st.text_input(
-                    "Query",
-                    value="",
-                    placeholder="Ask a question about your documents... (Press Enter to send)",
-                    label_visibility="collapsed",
-                    key="query_input_field"
-                )
+            query_text = st.text_area(
+                "Query",
+                value="",
+                placeholder="Ask a detailed question about your documents...\n\nExample: What was the revenue in Q3 2024?",
+                label_visibility="collapsed",
+                key="query_input_field",
+                height=100
+            )
+            
+            col_spacer, col_btn = st.columns([5, 1])
             with col_btn:
                 submitted = st.form_submit_button("➤ Send", type="secondary", use_container_width=True)
             
