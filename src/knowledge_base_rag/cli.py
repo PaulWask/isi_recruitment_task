@@ -68,3 +68,4 @@ if __name__ == "__main__":
     print()
     print("Run 'uv run kb-index --help' for more information")
 
+

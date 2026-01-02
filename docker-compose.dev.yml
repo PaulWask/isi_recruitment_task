@@ -51,7 +51,7 @@ services:
       # RAG settings
       - CHUNK_SIZE=1024
       - CHUNK_OVERLAP=128
-      - SIMILARITY_TOP_K=6
+      - SIMILARITY_TOP_K=10
       - COLLECTION_NAME=knowledge_base
       
       # Streamlit configuration (inline - no need for separate config file)

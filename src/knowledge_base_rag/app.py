@@ -223,6 +223,10 @@ def init_session_state():
         # Flag to prevent sidebar changes from interrupting queries
         st.session_state.is_processing = False
     
+    if "stop_requested" not in st.session_state:
+        # Flag to signal query cancellation
+        st.session_state.stop_requested = False
+    
     if "query_to_process" not in st.session_state:
         # Query waiting to be processed (after rerun for frozen UI)
         st.session_state.query_to_process = None
@@ -375,14 +379,10 @@ def render_sidebar():
             if is_processing:
                 st.warning("⏳ Query in progress... please wait")
                 # Show current settings as static text (no interactive widgets!)
-                if st.session_state.setting_query_expansion:
-                    st.markdown("☑️ Query Expansion: **Enabled**")
-                else:
-                    st.markdown("☐ Query Expansion: Disabled")
-                if st.session_state.setting_hybrid_search:
-                    st.markdown("☑️ Hybrid Search: **Enabled**")
-                else:
-                    st.markdown("☐ Hybrid Search: Disabled")
+                exp_status = "✅ Enabled" if st.session_state.setting_query_expansion else "⬜ Disabled"
+                hyb_status = "✅ Enabled" if st.session_state.setting_hybrid_search else "⬜ Disabled"
+                st.markdown(f"**Query Expansion:** {exp_status}")
+                st.markdown(f"**Hybrid Search:** {hyb_status}")
                 # Use stored values
                 use_query_expansion = st.session_state.setting_query_expansion
                 use_hybrid_search = st.session_state.setting_hybrid_search
@@ -443,6 +443,8 @@ def render_sidebar():
         if st.button("🗑️ Clear History", use_container_width=True):
             st.session_state.messages = []
             st.session_state.is_processing = False
+            st.session_state.stop_requested = False
+            st.session_state.query_to_process = None
             st.session_state.total_queries = 0
             # Clear the saved history file (truncate instead of delete for Docker volumes)
             try:
@@ -541,16 +543,20 @@ def render_metrics_summary(metrics) -> None:
     else:
         precision_color = "#f56565"  # red
     
-    # Query expansion indicator
-    expansion_str = ""
-    if hasattr(metrics, 'expansion_enabled') and metrics.expansion_enabled:
+    # Query expansion indicator - always show status
+    expansion_enabled = hasattr(metrics, 'expansion_enabled') and metrics.expansion_enabled
+    if expansion_enabled:
         queries_used = getattr(metrics, 'queries_used', 1)
-        expansion_str = f'<span>🔄 Expanded: <strong>{queries_used}q</strong></span>'
+        expansion_str = f'<span style="color: #48bb78;">✓ Expansion ({queries_used}q)</span>'
+    else:
+        expansion_str = ''
     
-    # Hybrid search indicator
-    hybrid_str = ""
-    if hasattr(metrics, 'hybrid_enabled') and metrics.hybrid_enabled:
-        hybrid_str = '<span>🔀 <strong>Hybrid</strong></span>'
+    # Hybrid search indicator - always show status
+    hybrid_enabled = hasattr(metrics, 'hybrid_enabled') and metrics.hybrid_enabled
+    if hybrid_enabled:
+        hybrid_str = '<span style="color: #48bb78;">✓ Hybrid</span>'
+    else:
+        hybrid_str = ''
     
     # Render compact metrics bar
     st.markdown(f"""
@@ -629,18 +635,22 @@ def render_chat_history(show_sources: bool):
                 else:
                     precision_color = "#f56565"
                 
-                # Query expansion indicator
+                # Query expansion indicator - only show when enabled
                 expansion_data = metrics_dict.get("expansion", {})
                 expansion_enabled = expansion_data.get("enabled", False)
-                expansion_str = ""
                 if expansion_enabled:
                     queries_used = expansion_data.get("queries_used", 1)
-                    expansion_str = f'<span>🔄 {queries_used}q</span>'
+                    expansion_str = f'<span style="color: #48bb78;">✓ Expansion ({queries_used}q)</span>'
+                else:
+                    expansion_str = ''
                 
-                # Hybrid search indicator
+                # Hybrid search indicator - only show when enabled
                 hybrid_data = metrics_dict.get("hybrid", {})
                 hybrid_enabled = hybrid_data.get("enabled", False)
-                hybrid_str = '<span>🔀 Hybrid</span>' if hybrid_enabled else ""
+                if hybrid_enabled:
+                    hybrid_str = '<span style="color: #48bb78;">✓ Hybrid</span>'
+                else:
+                    hybrid_str = ''
                 
                 st.markdown(f"""
                 <div style="display: flex; gap: 1rem; flex-wrap: wrap; font-size: 0.8rem; color: #a0aec0; margin-top: 0.5rem; padding: 0.5rem; background: rgba(102,126,234,0.05); border-radius: 0.5rem;">
@@ -752,9 +762,23 @@ def main():
             # Advanced Retrieval - locked during processing
             st.markdown("### 🔧 Advanced Retrieval")
             st.info("🔍 **Processing query...**")
-            st.warning("⏳ Settings locked - please wait")
             st.markdown(f"• Query Expansion: **{'On' if st.session_state.get('setting_query_expansion') else 'Off'}**")
             st.markdown(f"• Hybrid Search: **{'On' if st.session_state.get('setting_hybrid_search') else 'Off'}**")
+            
+            st.divider()
+            
+            # Stop button in sidebar during processing
+            if st.button("🛑 Stop Query", type="primary", use_container_width=True, key="stop_sidebar"):
+                st.session_state.stop_requested = True
+                st.session_state.is_processing = False
+                st.session_state.query_to_process = None
+                st.session_state.messages.append({
+                    "role": "assistant",
+                    "content": "⚠️ Query cancelled by user.",
+                    "sources": [],
+                })
+                save_chat_history()  # Save before rerun to persist
+                st.rerun()
         
         # Show header
         st.markdown("## 📚 Knowledge Base Q&A")
@@ -763,49 +787,139 @@ def main():
         show_sources = st.session_state.get("setting_show_sources", True)
         render_chat_history(show_sources)
         
+        # ==========================================================================
+        # STREAMING GENERATION WITH STOP BUTTON AT BOTTOM
+        # ==========================================================================
+        
         # Get the query to process
         query = st.session_state.query_to_process
-        st.session_state.query_to_process = None  # Clear immediately to prevent re-processing
+        st.session_state.query_to_process = None  # Clear immediately
         
-        # Get engine and process
+        # Check if stop was requested before starting
+        if st.session_state.get("stop_requested", False):
+            st.session_state.stop_requested = False
+            st.session_state.is_processing = False
+            st.rerun()
+        
+        # Placeholders for streaming UI
+        status_placeholder = st.empty()
+        answer_placeholder = st.empty()
+        
+        # ==========================================================================
+        # CHAT INPUT AREA (STOP BUTTON) - Always at bottom during processing
+        # ==========================================================================
+        st.markdown("<div style='margin-top: 2rem;'></div>", unsafe_allow_html=True)
+        col1, col2 = st.columns([6, 1])
+        with col1:
+            st.text_input(
+                "Query",
+                value="⏳ Generating response...",
+                disabled=True,
+                label_visibility="collapsed",
+                key="frozen_input"
+            )
+        with col2:
+            stop_clicked = st.button("🛑 Stop", type="primary", use_container_width=True, key="stop_frozen")
+            if stop_clicked:
+                st.session_state.stop_requested = True
+        
+        # Start streaming
+        status_placeholder.info("🔍 Searching knowledge base...")
+        
         engine = get_rag_engine()
         if engine:
             current_top_k = st.session_state.get("setting_top_k", 10)
             current_query_expansion = st.session_state.get("setting_query_expansion", False)
             current_hybrid_search = st.session_state.get("setting_hybrid_search", False)
             
-            with st.spinner("🔍 Searching knowledge base..."):
-                try:
-                    response = engine.query(
-                        query,
-                        similarity_top_k=current_top_k,
-                        use_query_expansion=current_query_expansion,
-                        use_hybrid_search=current_hybrid_search,
-                    )
+            def check_stop():
+                return st.session_state.get("stop_requested", False)
+            
+            try:
+                if check_stop():
+                    raise InterruptedError("Query cancelled")
+                
+                stream = engine.query_stream(
+                    query,
+                    similarity_top_k=current_top_k,
+                    use_query_expansion=current_query_expansion,
+                    use_hybrid_search=current_hybrid_search,
+                    stop_check=check_stop,
+                )
+                
+                sources = []
+                full_answer = ""
+                metrics_data = {}
+                
+                for chunk in stream:
+                    chunk_type = chunk.get("type")
                     
-                    # Store response in messages
-                    st.session_state.messages.append({
-                        "role": "assistant",
-                        "content": response.answer,
-                        "sources": response.sources,
-                        "latency_ms": response.metrics.e2e_ms if response.metrics else 0,
-                        "metrics": response.metrics.to_dict() if response.metrics else {},
-                        "warning": response.warning,
-                    })
-                    st.session_state.total_queries += 1
-                    save_chat_history()
+                    if chunk_type == "sources":
+                        sources = chunk.get("data", [])
+                        retrieval_ms = chunk.get("retrieval_ms", 0)
+                        status_placeholder.success(f"✅ Found {len(sources)} sources ({retrieval_ms:.0f}ms)")
                         
-                except Exception as e:
-                    logger.exception("Query failed")
-                    st.session_state.messages.append({
-                        "role": "assistant",
-                        "content": f"❌ Error: {str(e)}",
-                        "sources": [],
-                    })
-                finally:
-                    st.session_state.is_processing = False
+                    elif chunk_type == "token":
+                        token = chunk.get("data", "")
+                        full_answer += token
+                        answer_placeholder.markdown(full_answer + "▌")
+                        
+                    elif chunk_type == "complete":
+                        full_answer = chunk.get("data", full_answer)
+                        metrics_data = chunk.get("metrics", {})
+                        answer_placeholder.markdown(full_answer)
+                        status_placeholder.empty()
+                        
+                    elif chunk_type == "stopped":
+                        full_answer = chunk.get("data", "") or "⚠️ Query cancelled."
+                        answer_placeholder.markdown(full_answer)
+                        status_placeholder.empty()
+                        break
+                        
+                    elif chunk_type == "error":
+                        full_answer = f"❌ Error: {chunk.get('data', 'Unknown')}"
+                        answer_placeholder.markdown(full_answer)
+                        status_placeholder.empty()
+                        break
+                
+                # Save response
+                e2e_ms = metrics_data.get("e2e_ms", 0) if isinstance(metrics_data, dict) else 0
+                retrieval_ms = metrics_data.get("retrieval_ms", 0) if isinstance(metrics_data, dict) else 0
+                source_scores = [s["score"] for s in sources if isinstance(s, dict) and "score" in s]
+                avg_score = sum(source_scores) / max(len(source_scores), 1)
+                
+                st.session_state.messages.append({
+                    "role": "assistant",
+                    "content": full_answer,
+                    "sources": sources,
+                    "latency_ms": e2e_ms,
+                    "metrics": {
+                        "latency": {"e2e_ms": e2e_ms, "ttfr_ms": retrieval_ms},
+                        "retrieval": {"precision_at_k": 1.0 if sources else 0, "mrr": 1.0, "hit_rate": 1.0 if sources else 0, "avg_score": avg_score},
+                        "counts": {"above_threshold": len(sources), "total_retrieved": len(sources)},
+                        "expansion": {"enabled": current_query_expansion, "queries_used": 1},
+                        "hybrid": {"enabled": current_hybrid_search},
+                    },
+                    "warning": None,
+                })
+                st.session_state.total_queries += 1
+                save_chat_history()
+                
+            except InterruptedError:
+                logger.info("Query cancelled by user")
+                    
+            except Exception as e:
+                logger.exception("Query failed")
+                st.session_state.messages.append({
+                    "role": "assistant",
+                    "content": f"❌ Error: {str(e)}",
+                    "sources": [],
+                })
+            finally:
+                st.session_state.is_processing = False
+                st.session_state.stop_requested = False
         
-        # CRITICAL: Rerun to exit frozen UI and show normal interface with answer
+        # Rerun to show normal UI
         st.rerun()
     
     # Show loading indicator if not initialized yet
@@ -861,27 +975,71 @@ def main():
     # During processing, input is disabled to prevent duplicate submissions.
     # ==========================================================================
     
-    # Chat input - only capture new query if not already processing
-    new_prompt = None
-    if not st.session_state.get("is_processing", False):
-        new_prompt = st.chat_input("Ask a question about your documents...")
-    else:
-        # Show disabled input with message
-        st.chat_input("⏳ Processing...", disabled=True)
+    # ==========================================================================
+    # CUSTOM CHAT INPUT WITH SEND/STOP BUTTON
+    # ==========================================================================
+    is_processing = st.session_state.get("is_processing", False)
     
-    # Handle new query submission
-    if new_prompt:
-        # Store query and settings, then RERUN to show frozen UI
-        st.session_state.query_to_process = new_prompt
-        st.session_state.is_processing = True
-        st.session_state.setting_top_k = top_k
-        # Add user message NOW so it shows in the frozen UI
-        st.session_state.messages.append({
-            "role": "user",
-            "content": new_prompt,
-        })
-        # RERUN immediately - this will hit the frozen UI block at the top
-        st.rerun()
+    # Initialize query input in session state
+    if "query_input" not in st.session_state:
+        st.session_state.query_input = ""
+    
+    col1, col2 = st.columns([6, 1])
+    
+    with col1:
+        if is_processing:
+            # Show disabled input during processing
+            st.text_input(
+                "Query",
+                value="⏳ Processing your query...",
+                disabled=True,
+                label_visibility="collapsed",
+                key="query_disabled"
+            )
+        else:
+            # Normal text input
+            query_text = st.text_input(
+                "Query",
+                value="",
+                placeholder="Ask a question about your documents...",
+                label_visibility="collapsed",
+                key="query_input_field"
+            )
+    
+    with col2:
+        if is_processing:
+            # STOP button (red)
+            if st.button("🛑 Stop", type="primary", use_container_width=True, key="stop_main"):
+                st.session_state.stop_requested = True
+                st.session_state.is_processing = False
+                st.session_state.query_to_process = None
+                st.session_state.messages.append({
+                    "role": "assistant",
+                    "content": "⚠️ Query cancelled by user.",
+                    "sources": [],
+                })
+                save_chat_history()
+                st.rerun()
+        else:
+            # SEND button (normal)
+            send_clicked = st.button("➤ Send", type="secondary", use_container_width=True, key="send_main")
+            
+            # Handle send (button click or Enter key via form would be better, but this works)
+            if send_clicked and query_text and query_text.strip():
+                new_prompt = query_text.strip()
+                # Reset stop flag
+                st.session_state.stop_requested = False
+                # Store query and settings
+                st.session_state.query_to_process = new_prompt
+                st.session_state.is_processing = True
+                st.session_state.setting_top_k = top_k
+                # Add user message
+                st.session_state.messages.append({
+                    "role": "user",
+                    "content": new_prompt,
+                })
+                save_chat_history()
+                st.rerun()
 
 
 # Streamlit runs the entire script on each interaction

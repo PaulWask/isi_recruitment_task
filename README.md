@@ -47,8 +47,15 @@ echo "GROQ_API_KEY=your-key-here" >> .env
 
 ### Step 4: Index Documents (One-Time, ~10-30 min)
 ```bash
-uv run python scripts/index_documents.py
+# RECOMMENDED: Small chunks for financial tables/structured data
+uv run python scripts/index_documents.py --strategy small
+
+# Alternative: Default chunking for general text documents
+# uv run python scripts/index_documents.py
 ```
+
+> **Why `--strategy small`?** The domain data contains financial PDFs with tables. 
+> Smaller chunks (256 tokens) keep table rows together, improving retrieval accuracy for specific values.
 
 ### Step 5: Run the App
 ```bash
@@ -79,6 +86,18 @@ docker-compose --profile indexing up indexer
 
 # Access at http://localhost:8501
 ```
+
+### Docker Development Mode
+
+For development with hot-reload and debugging:
+
+| Command | Purpose |
+|---------|---------|
+| `docker-compose -f docker-compose.dev.yml up --build` | Build & run (foreground) |
+| `docker-compose -f docker-compose.dev.yml up --build -d` | Build & run (background) |
+| `docker-compose -f docker-compose.dev.yml down` | Stop containers |
+| `docker-compose -f docker-compose.dev.yml logs -f` | View logs |
+| `docker-compose -f docker-compose.dev.yml restart rag-app-dev` | Restart app only |
 
 ---
 
@@ -111,6 +130,18 @@ docker-compose --profile indexing up indexer
 | Web UI | Streamlit | Rapid prototyping, Python-native |
 | Package Manager | UV | Fast, modern, lockfile support |
 
+### Models Used
+
+The application uses **two different types of models** for different purposes:
+
+| Purpose | Model | Type | Description |
+|---------|-------|------|-------------|
+| **Embeddings** (search & indexing) | `all-MiniLM-L6-v2` | Sentence Transformer | Local, fast, free. Converts text → vectors for semantic search. |
+| **Chat answers** (LLM) | `llama3.2:3b` via Ollama | Large Language Model | Local, slower, free. Generates answers from retrieved context. |
+| **Chat answers** (alternative) | `llama-3.1-70b-versatile` via Groq | Large Language Model | Cloud, fast, free tier. 23x more parameters for better quality. |
+
+> **Note:** Embeddings always run locally. You choose ONE LLM option via `LLM_SERVICE` in `.env`.
+
 ## Prerequisites
 
 - Python 3.11+ (recommended: 3.11 or 3.12)
@@ -124,11 +155,11 @@ docker-compose --profile indexing up indexer
 ### Indexing Options
 
 ```bash
-# Standard indexing (1024-token chunks, good for general documents)
-uv run python scripts/index_documents.py
-
-# Small chunks (256 tokens) - RECOMMENDED for financial tables/structured data
+# RECOMMENDED: Small chunks for financial/structured data (this dataset)
 uv run python scripts/index_documents.py --strategy small
+
+# Standard indexing (1024-token chunks, for general documents)
+uv run python scripts/index_documents.py --strategy sentence
 
 # Preview what will be indexed (no changes)
 uv run python scripts/index_documents.py --dry-run
@@ -141,12 +172,12 @@ uv run python scripts/index_documents.py --force
 ```
 
 **Chunking Strategies:**
-| Strategy | Chunk Size | Best For |
-|----------|-----------|----------|
-| `sentence` (default) | 1024 tokens | General text, narratives |
-| `small` | 256 tokens | **Financial tables, structured data** |
-| `semantic` | 512 tokens | Medium granularity |
-| `large` | 2048 tokens | Dense context needed |
+| Strategy | Chunk Size | Best For | This Dataset |
+|----------|-----------|----------|--------------|
+| **`small`** | **256 tokens** | **Financial tables, structured data** | ✅ **RECOMMENDED** |
+| `sentence` (default) | 1024 tokens | General text, narratives | ⚠️ May split tables |
+| `semantic` | 512 tokens | Medium granularity | - |
+| `large` | 2048 tokens | Dense context needed | - |
 
 **What indexing does:**
 - Loads all PDFs from `./domaindata/` (~500 files)
@@ -182,8 +213,7 @@ Key settings:
 |----------|---------|-------------|
 | `LLM_SERVICE` | `local` | `local` (Ollama) or `groq` |
 | `GROQ_API_KEY` | - | Required if using Groq |
-| `CHUNK_SIZE` | `1024` | Tokens per chunk |
-| `SIMILARITY_TOP_K` | `6` | Chunks to retrieve per query |
+| `SIMILARITY_TOP_K` | `10` | Chunks to retrieve per query (optimized for 256-token chunks) |
 
 ## Project Structure
 

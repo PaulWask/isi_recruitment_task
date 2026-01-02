@@ -587,3 +587,93 @@ details[open] summary {
         border-width: 2px;
     }
 }
+
+/* ==========================================================================
+   Stop Button Styling
+   ========================================================================== */
+
+/* ==========================================================================
+   Send Button Styling
+   ========================================================================== */
+
+/* Secondary (send) button - accent gradient */
+.stButton > button[kind="secondary"] {
+    background: var(--accent-gradient) !important;
+    border: none !important;
+    color: white !important;
+    font-weight: 600 !important;
+    box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3) !important;
+    transition: all 0.2s ease !important;
+}
+
+.stButton > button[kind="secondary"]:hover {
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4) !important;
+    transform: translateY(-1px) !important;
+}
+
+.stButton > button[kind="secondary"]:active {
+    transform: translateY(0) !important;
+}
+
+/* Primary (red) stop button */
+.stButton > button[kind="primary"] {
+    background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%) !important;
+    border: none !important;
+    color: white !important;
+    font-weight: 600 !important;
+    box-shadow: 0 2px 8px rgba(239, 68, 68, 0.3) !important;
+    transition: all 0.2s ease !important;
+}
+
+.stButton > button[kind="primary"]:hover {
+    background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%) !important;
+    box-shadow: 0 4px 12px rgba(239, 68, 68, 0.4) !important;
+    transform: translateY(-1px) !important;
+}
+
+.stButton > button[kind="primary"]:active {
+    transform: translateY(0) !important;
+}
+
+/* Processing indicator in input */
+.stTextInput input:disabled {
+    background: rgba(102, 126, 234, 0.1) !important;
+    color: var(--text-secondary) !important;
+    font-style: italic;
+}
+
+/* Text input styling */
+.stTextInput input {
+    border-radius: var(--radius-md) !important;
+    border: 1px solid var(--border-medium) !important;
+    padding: 0.75rem 1rem !important;
+}
+
+.stTextInput input:focus {
+    border-color: var(--accent-primary) !important;
+    box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.2) !important;
+}
+
+/* ==========================================================================
+   Chat Input Container Styling
+   ========================================================================== */
+
+/* Add margin above the input area */
+.stTextInput {
+    margin-top: 1rem !important;
+}
+
+/* Ensure input area stays at bottom with proper spacing */
+.element-container:has(.stTextInput) {
+    margin-top: 1.5rem !important;
+}
+
+/* Metrics bar spacing */
+.metrics-bar {
+    margin-bottom: 1.5rem !important;
+}
+
+/* Source cards container spacing */
+.sources-container {
+    margin-bottom: 1.5rem !important;
+}

@@ -40,9 +40,9 @@ from typing import Literal
 # Add src to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from knowledge_base_rag.core.config import settings
+from knowledge_base_rag.core.config import settings, ChunkingStrategy
 from knowledge_base_rag.data.loader import DocumentLoader
-from knowledge_base_rag.data.processor import DocumentProcessor, CHUNKING_PRESETS, ChunkingStrategy
+from knowledge_base_rag.data.processor import DocumentProcessor
 from knowledge_base_rag.storage.embeddings import get_embed_model
 from knowledge_base_rag.storage.vector_store import VectorStoreManager
 
@@ -129,11 +129,8 @@ def print_banner(mode: str = "full"):
 
 def print_config(strategy: str = "sentence"):
     """Print current configuration."""
-    # Get actual chunk sizes from strategy preset
-    preset = CHUNKING_PRESETS.get(
-        ChunkingStrategy(strategy),
-        CHUNKING_PRESETS[ChunkingStrategy.SENTENCE]
-    )
+    # Get actual chunk sizes from centralized settings (Single Source of Truth)
+    preset = settings.get_chunking_preset(strategy)
     chunk_size = preset["chunk_size"]
     chunk_overlap = preset["chunk_overlap"]
     
