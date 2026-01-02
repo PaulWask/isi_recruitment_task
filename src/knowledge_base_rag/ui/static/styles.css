@@ -593,11 +593,13 @@ details[open] summary {
    ========================================================================== */
 
 /* ==========================================================================
-   Send Button Styling
+   Send Button Styling (accent gradient - purple/blue)
    ========================================================================== */
 
-/* Secondary (send) button - accent gradient */
-.stButton > button[kind="secondary"] {
+/* Secondary buttons and form submit buttons - accent gradient */
+.stButton > button[kind="secondary"],
+.stFormSubmitButton > button[kind="secondary"],
+.stFormSubmitButton > button:not([kind="primary"]) {
     background: var(--accent-gradient) !important;
     border: none !important;
     color: white !important;
@@ -606,14 +608,22 @@ details[open] summary {
     transition: all 0.2s ease !important;
 }
 
-.stButton > button[kind="secondary"]:hover {
+.stButton > button[kind="secondary"]:hover,
+.stFormSubmitButton > button[kind="secondary"]:hover,
+.stFormSubmitButton > button:not([kind="primary"]):hover {
     box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4) !important;
     transform: translateY(-1px) !important;
 }
 
-.stButton > button[kind="secondary"]:active {
+.stButton > button[kind="secondary"]:active,
+.stFormSubmitButton > button[kind="secondary"]:active,
+.stFormSubmitButton > button:not([kind="primary"]):active {
     transform: translateY(0) !important;
 }
+
+/* ==========================================================================
+   Stop Button Styling (red)
+   ========================================================================== */
 
 /* Primary (red) stop button */
 .stButton > button[kind="primary"] {
@@ -666,6 +676,47 @@ details[open] summary {
 /* Ensure input area stays at bottom with proper spacing */
 .element-container:has(.stTextInput) {
     margin-top: 1.5rem !important;
+}
+
+/* ==========================================================================
+   Inline Chat Input + Button Row
+   ========================================================================== */
+
+/* Force the columns containing input + button to be inline and aligned */
+div[data-testid="stHorizontalBlock"]:has(input[placeholder*="Ask a question"]),
+div[data-testid="stHorizontalBlock"]:has(input[value*="Processing"]) {
+    display: flex !important;
+    flex-direction: row !important;
+    flex-wrap: nowrap !important;
+    align-items: flex-end !important;
+    gap: 0.75rem !important;
+}
+
+/* Input column - take remaining space */
+div[data-testid="stHorizontalBlock"]:has(input[placeholder*="Ask a question"]) > div[data-testid="column"]:first-child,
+div[data-testid="stHorizontalBlock"]:has(input[value*="Processing"]) > div[data-testid="column"]:first-child {
+    flex: 1 1 auto !important;
+    min-width: 0 !important;
+}
+
+/* Button column - fixed width */
+div[data-testid="stHorizontalBlock"]:has(input[placeholder*="Ask a question"]) > div[data-testid="column"]:last-child,
+div[data-testid="stHorizontalBlock"]:has(input[value*="Processing"]) > div[data-testid="column"]:last-child {
+    flex: 0 0 auto !important;
+    width: 120px !important;
+    min-width: 100px !important;
+}
+
+/* Remove extra margin from button container */
+div[data-testid="stHorizontalBlock"] .stButton {
+    margin-top: 0 !important;
+    margin-bottom: 0 !important;
+}
+
+/* Ensure button aligns with input */
+div[data-testid="stHorizontalBlock"] .stButton button {
+    height: 42px !important;
+    min-height: 42px !important;
 }
 
 /* Metrics bar spacing */

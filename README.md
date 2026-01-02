@@ -213,7 +213,7 @@ Key settings:
 |----------|---------|-------------|
 | `LLM_SERVICE` | `local` | `local` (Ollama) or `groq` |
 | `GROQ_API_KEY` | - | Required if using Groq |
-| `SIMILARITY_TOP_K` | `10` | Chunks to retrieve per query (optimized for 256-token chunks) |
+| `SIMILARITY_TOP_K` | `5` | Chunks to retrieve per query (default for UI slider) |
 
 ## Project Structure
 

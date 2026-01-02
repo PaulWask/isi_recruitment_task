@@ -141,7 +141,7 @@ class RAGSettings(BaseSettings):
     # RETRIEVAL SETTINGS
     # =========================================================================
     # With 256-token chunks, we need more chunks to get equivalent context
-    similarity_top_k: int = 10  # 10 x 256 = ~2560 tokens context
+    similarity_top_k: int = 5  # 5 x 256 = ~1280 tokens context (UI default)
     similarity_cutoff: float = 0.7  # Filters low-relevance noise
 
     # =========================================================================

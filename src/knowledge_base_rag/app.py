@@ -806,22 +806,27 @@ def main():
         answer_placeholder = st.empty()
         
         # ==========================================================================
-        # CHAT INPUT AREA (STOP BUTTON) - Always at bottom during processing
+        # CHAT INPUT AREA (STOP BUTTON) - Aligned with input during processing
         # ==========================================================================
-        st.markdown("<div style='margin-top: 2rem;'></div>", unsafe_allow_html=True)
-        col1, col2 = st.columns([6, 1])
-        with col1:
-            st.text_input(
-                "Query",
-                value="⏳ Generating response...",
-                disabled=True,
-                label_visibility="collapsed",
-                key="frozen_input"
-            )
-        with col2:
-            stop_clicked = st.button("🛑 Stop", type="primary", use_container_width=True, key="stop_frozen")
-            if stop_clicked:
-                st.session_state.stop_requested = True
+        # Add spacing before input area
+        st.markdown("<div style='height: 1rem;'></div>", unsafe_allow_html=True)
+        
+        # Create inline container for input + button
+        input_container = st.container()
+        with input_container:
+            col_input, col_btn = st.columns([6, 1], gap="small")
+            with col_input:
+                st.text_input(
+                    "Query",
+                    value="⏳ Processing...",
+                    disabled=True,
+                    label_visibility="collapsed",
+                    key="frozen_input"
+                )
+            with col_btn:
+                stop_clicked = st.button("🛑 Stop", type="primary", use_container_width=True, key="stop_frozen")
+                if stop_clicked:
+                    st.session_state.stop_requested = True
         
         # Start streaming
         status_placeholder.info("🔍 Searching knowledge base...")
@@ -976,19 +981,37 @@ def main():
     # ==========================================================================
     
     # ==========================================================================
-    # CUSTOM CHAT INPUT WITH SEND/STOP BUTTON
+    # CHAT INPUT WITH SEND/STOP BUTTON (Inline layout)
     # ==========================================================================
     is_processing = st.session_state.get("is_processing", False)
     
-    # Initialize query input in session state
-    if "query_input" not in st.session_state:
-        st.session_state.query_input = ""
+    # CSS for inline input + button layout
+    st.markdown("""
+    <style>
+    /* Remove form border/padding */
+    div[data-testid="stForm"] {
+        border: none !important;
+        padding: 0 !important;
+        background: transparent !important;
+    }
+    /* Align columns at bottom */
+    div[data-testid="stHorizontalBlock"] {
+        align-items: flex-end !important;
+    }
+    /* Ensure button height matches input */
+    div[data-testid="stHorizontalBlock"] .stButton button,
+    div[data-testid="stHorizontalBlock"] .stFormSubmitButton button {
+        height: 42px !important;
+        min-height: 42px !important;
+        margin-bottom: 0 !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
     
-    col1, col2 = st.columns([6, 1])
-    
-    with col1:
-        if is_processing:
-            # Show disabled input during processing
+    if is_processing:
+        # During processing: show disabled input + Stop button
+        col_input, col_btn = st.columns([6, 1])
+        with col_input:
             st.text_input(
                 "Query",
                 value="⏳ Processing your query...",
@@ -996,19 +1019,7 @@ def main():
                 label_visibility="collapsed",
                 key="query_disabled"
             )
-        else:
-            # Normal text input
-            query_text = st.text_input(
-                "Query",
-                value="",
-                placeholder="Ask a question about your documents...",
-                label_visibility="collapsed",
-                key="query_input_field"
-            )
-    
-    with col2:
-        if is_processing:
-            # STOP button (red)
+        with col_btn:
             if st.button("🛑 Stop", type="primary", use_container_width=True, key="stop_main"):
                 st.session_state.stop_requested = True
                 st.session_state.is_processing = False
@@ -1020,12 +1031,22 @@ def main():
                 })
                 save_chat_history()
                 st.rerun()
-        else:
-            # SEND button (normal)
-            send_clicked = st.button("➤ Send", type="secondary", use_container_width=True, key="send_main")
+    else:
+        # Normal state: Form with columns for input + Send button (Enter key works!)
+        with st.form(key="chat_form", clear_on_submit=True):
+            col_input, col_btn = st.columns([6, 1])
+            with col_input:
+                query_text = st.text_input(
+                    "Query",
+                    value="",
+                    placeholder="Ask a question about your documents... (Press Enter to send)",
+                    label_visibility="collapsed",
+                    key="query_input_field"
+                )
+            with col_btn:
+                submitted = st.form_submit_button("➤ Send", type="secondary", use_container_width=True)
             
-            # Handle send (button click or Enter key via form would be better, but this works)
-            if send_clicked and query_text and query_text.strip():
+            if submitted and query_text and query_text.strip():
                 new_prompt = query_text.strip()
                 # Reset stop flag
                 st.session_state.stop_requested = False
