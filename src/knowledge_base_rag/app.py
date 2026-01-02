@@ -543,33 +543,22 @@ def render_metrics_summary(metrics) -> None:
     else:
         precision_color = "#f56565"  # red
     
-    # Query expansion indicator - always show status
+    # Build features list
+    features = []
     expansion_enabled = hasattr(metrics, 'expansion_enabled') and metrics.expansion_enabled
+    hybrid_enabled = hasattr(metrics, 'hybrid_enabled') and metrics.hybrid_enabled
     if expansion_enabled:
         queries_used = getattr(metrics, 'queries_used', 1)
-        expansion_str = f'<span style="color: #48bb78;">✓ Expansion ({queries_used}q)</span>'
-    else:
-        expansion_str = ''
-    
-    # Hybrid search indicator - always show status
-    hybrid_enabled = hasattr(metrics, 'hybrid_enabled') and metrics.hybrid_enabled
+        features.append(f"✅ Expansion ({queries_used}q)")
     if hybrid_enabled:
-        hybrid_str = '<span style="color: #48bb78;">✓ Hybrid</span>'
-    else:
-        hybrid_str = ''
+        features.append("✅ Hybrid")
+    features_str = " | ".join(features) if features else ""
     
-    # Render compact metrics bar
-    st.markdown(f"""
-    <div style="display: flex; gap: 1rem; flex-wrap: wrap; font-size: 0.8rem; color: #a0aec0; margin-top: 0.5rem; padding: 0.5rem; background: rgba(102,126,234,0.05); border-radius: 0.5rem;">
-        <span>⏱️ <strong>{latency_str}</strong></span>
-        <span>📊 Precision: <strong style="color: {precision_color}">{precision:.0%}</strong></span>
-        <span>📈 Avg Score: <strong>{avg_score:.0%}</strong></span>
-        <span>📁 {sources} source{'s' if sources != 1 else ''}</span>
-        <span>🎯 MRR: <strong>{metrics.mrr:.2f}</strong></span>
-        {expansion_str}
-        {hybrid_str}
-    </div>
-    """, unsafe_allow_html=True)
+    # Render compact metrics bar using st.caption (no HTML needed)
+    metrics_text = f"⏱️ {latency_str} | 📊 P@K: {precision:.0%} | 📈 Score: {avg_score:.0%} | 📁 {sources} src | 🎯 MRR: {metrics.mrr:.2f}"
+    if features_str:
+        metrics_text += f" | {features_str}"
+    st.caption(metrics_text)
     
     # Optional: Detailed metrics expander
     with st.expander("📈 Detailed Metrics", expanded=False):
@@ -635,34 +624,24 @@ def render_chat_history(show_sources: bool):
                 else:
                     precision_color = "#f56565"
                 
-                # Query expansion indicator - only show when enabled
+                # Build features list (no HTML, just text)
+                features = []
                 expansion_data = metrics_dict.get("expansion", {})
-                expansion_enabled = expansion_data.get("enabled", False)
-                if expansion_enabled:
+                if expansion_data.get("enabled", False):
                     queries_used = expansion_data.get("queries_used", 1)
-                    expansion_str = f'<span style="color: #48bb78;">✓ Expansion ({queries_used}q)</span>'
-                else:
-                    expansion_str = ''
+                    features.append(f"✅ Expansion ({queries_used}q)")
                 
-                # Hybrid search indicator - only show when enabled
                 hybrid_data = metrics_dict.get("hybrid", {})
-                hybrid_enabled = hybrid_data.get("enabled", False)
-                if hybrid_enabled:
-                    hybrid_str = '<span style="color: #48bb78;">✓ Hybrid</span>'
-                else:
-                    hybrid_str = ''
+                if hybrid_data.get("enabled", False):
+                    features.append("✅ Hybrid")
                 
-                st.markdown(f"""
-                <div style="display: flex; gap: 1rem; flex-wrap: wrap; font-size: 0.8rem; color: #a0aec0; margin-top: 0.5rem; padding: 0.5rem; background: rgba(102,126,234,0.05); border-radius: 0.5rem;">
-                    <span>⏱️ <strong>{latency_str}</strong></span>
-                    <span>📊 P@K: <strong style="color: {precision_color}">{precision:.0%}</strong></span>
-                    <span>📈 Score: <strong>{avg_score:.0%}</strong></span>
-                    <span>📁 {sources} src</span>
-                    <span>🎯 MRR: {mrr:.2f}</span>
-                    {expansion_str}
-                    {hybrid_str}
-                </div>
-                """, unsafe_allow_html=True)
+                features_str = " | ".join(features) if features else ""
+                
+                # Render compact metrics using st.caption (no HTML escaping issues)
+                metrics_text = f"⏱️ {latency_str} | 📊 P@K: {precision:.0%} | 📈 Score: {avg_score:.0%} | 📁 {sources} src | 🎯 MRR: {mrr:.2f}"
+                if features_str:
+                    metrics_text += f" | {features_str}"
+                st.caption(metrics_text)
             elif "latency_ms" in msg:
                 # Fallback for old messages without full metrics
                 latency = msg["latency_ms"]
@@ -939,7 +918,7 @@ def main():
         </style>
         <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:50vh;">
             <div style="font-size:3rem; margin-bottom:1rem;">📚</div>
-            <h2 style="color:#667eea; margin:0;">Loading Knowledge Base...</h2>
+            <div style="color:#667eea; margin:0; font-size:1.5rem; font-weight:600;">Loading Knowledge Base...</div>
             <p style="color:#888; margin-top:0.5rem; animation: kb-pulse 1.5s ease-in-out infinite;">First load may take a moment...</p>
             <div style="width:40px; height:40px; border:4px solid rgba(102,126,234,0.2); border-top-color:#667eea; border-radius:50%; margin-top:1.5rem; animation: kb-spin 1s linear infinite;"></div>
         </div>
