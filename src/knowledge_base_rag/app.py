@@ -601,13 +601,12 @@ def render_chat_history(show_sources: bool):
                 # Reconstruct metrics display from stored dict
                 latency_data = metrics_dict.get("latency", {})
                 retrieval_data = metrics_dict.get("retrieval", {})
-                scores_data = metrics_dict.get("scores", {})
-                coverage_data = metrics_dict.get("coverage", {})
+                counts_data = metrics_dict.get("counts", {})
                 
                 latency = latency_data.get("e2e_ms", msg.get("latency_ms", 0))
                 precision = retrieval_data.get("precision_at_k", 0)
-                avg_score = scores_data.get("avg", 0)
-                sources = coverage_data.get("unique_sources", 0)
+                avg_score = retrieval_data.get("avg_score", 0)  # Fixed: was in wrong dict
+                sources = counts_data.get("total_retrieved", len(msg.get("sources", [])))  # Fixed: use counts
                 mrr = retrieval_data.get("mrr", 0)
                 
                 # Format latency
